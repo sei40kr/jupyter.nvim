@@ -72,6 +72,8 @@ let
       jupyter-client
       ipykernel
       pynvim
+      pytest
+      pytest-mock
     ]
   );
 in

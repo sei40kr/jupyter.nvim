@@ -1,0 +1,33 @@
+[project]
+name = "jupyter-nvim-rplugin"
+version = "0.1.0"
+description = "Python remote plugin powering jupyter.nvim"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pynvim",
+    "jupyter_client",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+]
+
+[tool.basedpyright]
+include = ["rplugin", "tests"]
+extraPaths = ["rplugin/python3"]
+typeCheckingMode = "standard"
+pythonVersion = "3.10"
+reportMissingImports = "warning"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+pythonpath = ["rplugin/python3"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["result", "result-*"]
