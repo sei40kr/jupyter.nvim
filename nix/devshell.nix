@@ -61,9 +61,14 @@ let
     };
   };
 
+  treesitterParsers = pkgs.vimPlugins.nvim-treesitter.withPlugins (p: [ p.python ]);
+
   neovimWithPlugin = pkgs.wrapNeovimUnstable pkgs.neovim-unwrapped {
     extraPython3Packages = ps: [ ps.jupyter-client ];
-    plugins = [ { plugin = jupyterNvimPlugin; } ];
+    plugins = [
+      { plugin = jupyterNvimPlugin; }
+      { plugin = treesitterParsers; }
+    ];
   };
 
   pythonEnv = pkgs.python3.withPackages (
