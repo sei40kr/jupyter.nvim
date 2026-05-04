@@ -1,0 +1,16 @@
+# direnv
+.direnv/
+.envrc.local
+
+# nix
+result
+result-*
+
+# git-hooks.nix
+/.pre-commit-config.yaml
+
+# Python
+.venv/
+.ruff_cache/
+__pycache__/
+*.pyc
