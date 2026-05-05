@@ -1,0 +1,35 @@
+# %% [markdown]
+# # jupyter.nvim demo
+#
+# Open this file inside the devshell with `nvim examples/example.py`,
+# then `:JupyterStart python3` and step through the cells with
+# `:JupyterExecute` (or `<localleader>jx` if default keymaps are enabled).
+
+# %%
+print("hello from the kernel")
+
+# %%
+import math
+
+[math.sqrt(n) for n in range(1, 6)]
+
+# %%
+import numpy as np
+
+rng = np.random.default_rng(42)
+data = rng.normal(size=(3, 4))
+data
+
+# %%
+import pandas as pd
+
+df = pd.DataFrame(data, columns=list("ABCD"))
+df.describe()
+
+# %% [markdown]
+# ## Errors render too
+#
+# Run the next cell to see the traceback rendered as virtual text.
+
+# %%
+1 / 0
