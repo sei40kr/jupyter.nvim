@@ -11,6 +11,7 @@ local cell = require("jupyter.cell")
 local execute = require("jupyter.execute")
 local display = require("jupyter.display")
 local hover_mod = require("jupyter.hover")
+local registry = require("jupyter.registry")
 
 local M = {}
 
@@ -43,9 +44,7 @@ end
 ---@param bufnr integer
 ---@return jupyter_core.Kernel?
 local function get_kernel(bufnr)
-	---@type jupyter_core.Kernel?
-	local kernel = vim.b[bufnr].jupyter_kernel
-	return kernel
+	return registry.get(bufnr)
 end
 
 ---@param spec_name string
@@ -58,7 +57,7 @@ local function start_with_spec(spec_name, bufnr)
 	end
 	local Kernel = require("jupyter_core").Kernel
 	local kernel = Kernel.start(spec_name)
-	vim.b[bufnr].jupyter_kernel = kernel
+	registry.set(bufnr, kernel)
 end
 
 ---Prompt the user to pick a kernelspec when neither an argument nor a
@@ -111,7 +110,7 @@ function M.stop_kernel()
 		return
 	end
 	kernel:stop()
-	vim.b[bufnr].jupyter_kernel = nil
+	registry.clear(bufnr)
 	display.clear_all(bufnr)
 end
 

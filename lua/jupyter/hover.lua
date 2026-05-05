@@ -6,6 +6,7 @@
 ---escapes before handing the contents to Neovim's standard hover float.
 
 local cell = require("jupyter.cell")
+local registry = require("jupyter.registry")
 
 local M = {}
 
@@ -64,7 +65,7 @@ end
 function M.hover(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-	local kernel = vim.b[bufnr].jupyter_kernel
+	local kernel = registry.get(bufnr)
 	if kernel == nil then
 		vim.notify("jupyter: no kernel attached to this buffer", vim.log.levels.WARN)
 		return

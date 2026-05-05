@@ -6,6 +6,7 @@
 ---from the kernel are honoured verbatim.
 
 local completion = require("jupyter.completion")
+local registry = require("jupyter.registry")
 
 local M = {}
 
@@ -26,7 +27,7 @@ end
 ---@return boolean
 function Provider:enabled(ctx)
 	local bufnr = (ctx and ctx.bufnr) or vim.api.nvim_get_current_buf()
-	return vim.b[bufnr].jupyter_kernel ~= nil
+	return registry.get(bufnr) ~= nil
 end
 
 ---@return string[]

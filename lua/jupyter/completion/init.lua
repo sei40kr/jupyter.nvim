@@ -7,6 +7,7 @@
 ---source-contract glue.
 
 local cell_mod = require("jupyter.cell")
+local registry = require("jupyter.registry")
 
 local CompletionItemKind = vim.lsp.protocol.CompletionItemKind
 
@@ -56,8 +57,7 @@ end
 ---@param winid integer
 ---@return jupyter.CompletionItem[]?, jupyter.Cell?
 function M.complete_at_cursor(bufnr, winid)
-	---@type jupyter_core.Kernel?
-	local kernel = vim.b[bufnr].jupyter_kernel
+	local kernel = registry.get(bufnr)
 	if kernel == nil then
 		return nil, nil
 	end

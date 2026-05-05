@@ -3,20 +3,19 @@
 ---Glue between `jupyter.cell` (where the cell lives), `jupyter_core.Kernel`
 ---(how code is executed), and `jupyter.display` (how results are shown).
 ---Does not own kernel lifecycle: the buffer-local kernel must already be
----stored at `vim.b[bufnr].jupyter_kernel` (a `jupyter_core.Kernel`) by the
+---registered with `jupyter.registry` (a `jupyter_core.Kernel`) by the
 ---caller — typically `jupyter.start_kernel`.
 
 local cell_mod = require("jupyter.cell")
 local display = require("jupyter.display")
+local registry = require("jupyter.registry")
 
 local M = {}
 
 ---@param bufnr integer
 ---@return jupyter_core.Kernel?
 local function get_kernel(bufnr)
-	---@type jupyter_core.Kernel?
-	local kernel = vim.b[bufnr].jupyter_kernel
-	return kernel
+	return registry.get(bufnr)
 end
 
 ---@param bufnr integer
@@ -64,7 +63,7 @@ local function run_cell(bufnr, cell, kernel)
 end
 
 ---Execute the cell at the cursor (or at `row` if given) using the
----buffer-local kernel stored in `vim.b[bufnr].jupyter_kernel`.
+---buffer-local kernel registered with `jupyter.registry`.
 ---On success: status=busy → outputs rendered → status=idle.
 ---On error: status=error and the traceback is rendered as the cell's output.
 ---@param bufnr integer

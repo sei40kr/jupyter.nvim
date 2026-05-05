@@ -5,6 +5,7 @@
 ---the byte ranges from the kernel are honoured verbatim.
 
 local completion = require("jupyter.completion")
+local registry = require("jupyter.registry")
 
 ---@class jupyter.completion.cmp.Source
 ---@field private _name string
@@ -27,7 +28,7 @@ end
 ---@return boolean
 function source:is_available()
 	local bufnr = vim.api.nvim_get_current_buf()
-	if vim.b[bufnr].jupyter_kernel == nil then
+	if registry.get(bufnr) == nil then
 		return false
 	end
 	local winid = vim.api.nvim_get_current_win()
