@@ -6,6 +6,6 @@ test-lua:
 	vusted tests/lua
 
 lint-lua:
-	lua-language-server --check lua/jupyter_core --configpath=$(CURDIR)/.luarc.json --checklevel=Warning
+	lua-language-server --check lua --configpath=$(CURDIR)/.luarc.json --checklevel=Warning
 
 check: lint-lua test
