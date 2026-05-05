@@ -25,7 +25,9 @@ reportMissingImports = "warning"
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
 pythonpath = ["rplugin/python3"]
-addopts = "-q"
+# Integration tests live under ``tests/python/integration`` and require a
+# real Jupyter kernel; opt in via ``scripts/test-integration.sh``.
+addopts = "-q --ignore=tests/python/integration"
 
 [tool.ruff]
 line-length = 100
