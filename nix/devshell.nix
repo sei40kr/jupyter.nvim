@@ -70,7 +70,26 @@ let
       plugins = [
         { plugin = jupyterNvimPlugin; }
         { plugin = treesitterParsers; }
+        { plugin = pkgs.vimPlugins.blink-cmp; }
       ];
+      customRC = ''
+        lua << EOF
+          require("blink.cmp").setup({
+            sources = {
+              default = { "jupyter", "buffer" },
+              providers = {
+                jupyter = {
+                  name = "jupyter",
+                  module = "jupyter.completion.blink",
+                  score_offset = 100,
+                  async = false,
+                },
+              },
+            },
+            keymap = { preset = "default" },
+          })
+        EOF
+      '';
     }
   );
 
