@@ -311,6 +311,26 @@ describe("jupyter.lsp _make_server", function()
 			assert.equals("hello world", plain_result.contents.value)
 		end)
 
+		it("strips groff overprinting (underline/bold) from R help text", function()
+			local bufnr = named_buf({ "# %%", "x = 1" })
+			-- "_<BS>D_<BS>e_<BS>s" → underlined "Des"; "B<BS>Bo<BS>old" → bold "Bold".
+			local raw = "_\008D_\008e_\008s\n" .. "B\008Bo\008old"
+			set_kernel(bufnr, {
+				inspect_async = function(_self, _code, _pos, cb)
+					cb(nil, {
+						found = true,
+						data = { ["text/plain"] = raw },
+					})
+				end,
+			})
+			local _, result = call("textDocument/hover", {
+				textDocument = { uri = uri_for(bufnr) },
+				position = { line = 1, character = 0 },
+			})
+			assert.is_table(result)
+			assert.equals("Des\nBold", result.contents.value)
+		end)
+
 		it("forwards the byte offset of the cursor inside the cell", function()
 			local bufnr = named_buf({
 				"# %%",

@@ -33,10 +33,16 @@ local function kind_for(label)
 	return CompletionItemKind.Variable
 end
 
+---Strip terminal formatting that some kernels embed in inspect_reply
+---text. ANSI CSI escapes come from anything using `colorout`; the
+---`<char>\b<char>` overprinting sequences come out of R's help-text
+---formatter (groff-style: `_\bX` for underline, `X\bX` for bold).
 ---@param s string
 ---@return string
-local function strip_ansi(s)
-	return (s:gsub("\27%[[%d;]*[A-Za-z]", ""))
+local function strip_terminal_codes(s)
+	s = s:gsub("\27%[[%d;]*[A-Za-z]", "")
+	s = s:gsub(".\008", "")
+	return s
 end
 
 ---@param data table<string, string>
@@ -183,7 +189,7 @@ function M._handle_hover(params, callback)
 			callback(nil, {
 				contents = {
 					kind = (kind == "markdown") and "markdown" or "plaintext",
-					value = strip_ansi(body),
+					value = strip_terminal_codes(body),
 				},
 			})
 		end)

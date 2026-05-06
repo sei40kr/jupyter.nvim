@@ -2,19 +2,24 @@
 ---
 ---Resolves (code, cursor_pos) from the *current cell* — never the whole
 ---buffer — so symbols defined in earlier or later cells don't leak in.
----The kernel often returns ANSI-coloured plain text; we strip the
----escapes before handing the contents to Neovim's standard hover float.
+---Kernels routinely embed terminal formatting in the reply (ANSI colour
+---from ipykernel/colorout, BS-overprint groff sequences from IRkernel's
+---R help-text formatter); we strip both before showing the float.
 
 local cell = require("jupyter.cell")
 local registry = require("jupyter.registry")
 
 local M = {}
 
----Strip ANSI CSI escape sequences (e.g. color codes) from `s`.
+---Strip ANSI CSI escapes plus `<char>\b<char>` overprinting sequences
+---(`_\bX` for underline, `X\bX` for bold — produced by R's help-text
+---formatter via IRkernel).
 ---@param s string
 ---@return string
-local function strip_ansi(s)
-	return (s:gsub("\27%[[%d;]*[A-Za-z]", ""))
+local function strip_terminal_codes(s)
+	s = s:gsub("\27%[[%d;]*[A-Za-z]", "")
+	s = s:gsub(".\008", "")
+	return s
 end
 
 ---Byte offset of (cursor_row, cursor_col) inside
@@ -100,7 +105,7 @@ function M.hover(bufnr)
 			return
 		end
 
-		local stripped = strip_ansi(body)
+		local stripped = strip_terminal_codes(body)
 		local lines = vim.split(stripped, "\n", { plain = true })
 		vim.lsp.util.open_floating_preview(lines, filetype, { border = "rounded" })
 	end)
