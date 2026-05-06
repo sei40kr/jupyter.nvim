@@ -1,4 +1,4 @@
----Cell detection for Python percent-format buffers.
+---Cell detection for percent-format buffers.
 ---
 ---Cells are delimited by `# %%` (code) or `# %% [markdown]` markers.
 ---The marker line is the first line of the cell it introduces, and
@@ -8,11 +8,34 @@
 ---Lines preceding the first marker (the preamble) belong to no cell,
 ---matching the convention used by VS Code's interactive window and
 ---Jupytext.
+---
+---Supported filetypes are listed in `FILETYPE_TO_LANG`; each maps to
+---the tree-sitter language whose `queries/<lang>/jupyter.scm` query
+---captures the cell markers.
 
 local M = {}
 
-local LANG = "python"
 local QUERY_NAME = "jupyter"
+
+---@type table<string, string>
+local FILETYPE_TO_LANG = {
+	python = "python",
+	julia = "julia",
+	r = "r",
+}
+
+---Tree-sitter language for `bufnr`'s filetype, or nil when unsupported.
+---@param bufnr integer
+---@return string?
+local function lang_for_buf(bufnr)
+	local ft = vim.bo[bufnr].filetype
+	return FILETYPE_TO_LANG[ft]
+end
+
+---@return string[]
+function M.supported_filetypes()
+	return vim.tbl_keys(FILETYPE_TO_LANG)
+end
 
 ---@class jupyter.Cell
 ---@field cell_type "code"|"markdown"
@@ -28,12 +51,17 @@ local QUERY_NAME = "jupyter"
 ---@param bufnr integer
 ---@return jupyter.cell.Marker[]
 local function collect_markers(bufnr)
-	local query = vim.treesitter.query.get(LANG, QUERY_NAME)
-	if query == nil then
-		error(("jupyter: queries/%s/%s.scm not found in runtimepath"):format(LANG, QUERY_NAME))
+	local lang = lang_for_buf(bufnr)
+	if lang == nil then
+		error(("jupyter: filetype %q is not supported"):format(vim.bo[bufnr].filetype))
 	end
 
-	local parser = vim.treesitter.get_parser(bufnr, LANG)
+	local query = vim.treesitter.query.get(lang, QUERY_NAME)
+	if query == nil then
+		error(("jupyter: queries/%s/%s.scm not found in runtimepath"):format(lang, QUERY_NAME))
+	end
+
+	local parser = vim.treesitter.get_parser(bufnr, lang)
 	local tree = parser:parse()[1]
 	local root = tree:root()
 

@@ -1,14 +1,16 @@
 ---@diagnostic disable: undefined-field
 -- Make the workspace's queries/ directory discoverable so the cell
--- module can resolve queries/python/jupyter.scm via runtimepath.
+-- module can resolve queries/<lang>/jupyter.scm via runtimepath.
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
 
 local cell = require("jupyter.cell")
 
+---@param filetype string
 ---@param lines string[]
 ---@return integer
-local function make_buf(lines)
+local function make_buf(filetype, lines)
 	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.bo[bufnr].filetype = filetype
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 	return bufnr
 end
@@ -16,7 +18,7 @@ end
 describe("jupyter.cell", function()
 	describe("get_all_cells", function()
 		it("returns one implicit code cell when there are no markers", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"import sys",
 				"x = 1",
 			})
@@ -29,7 +31,7 @@ describe("jupyter.cell", function()
 		end)
 
 		it("splits the buffer at every # %% marker", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"preamble",
 				"# %%",
 				"x = 1",
@@ -52,7 +54,7 @@ describe("jupyter.cell", function()
 		end)
 
 		it("treats # %% [markdown] as a markdown cell", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"# %% [markdown]",
 				"# Heading",
 				"# %%",
@@ -65,7 +67,7 @@ describe("jupyter.cell", function()
 		end)
 
 		it("produces a cell when the buffer contains only a markdown marker", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"# %% [markdown]",
 				"# Title",
 				"# Body",
@@ -78,7 +80,7 @@ describe("jupyter.cell", function()
 		end)
 
 		it("keeps trailing blank lines inside the last cell", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"# %%",
 				"x = 1",
 				"",
@@ -92,7 +94,7 @@ describe("jupyter.cell", function()
 		end)
 
 		it("recognises a marker with an optional title", function()
-			local buf = make_buf({
+			local buf = make_buf("python", {
 				"# %% Setup",
 				"import sys",
 				"# %% [markdown] Section header",
@@ -109,7 +111,7 @@ describe("jupyter.cell", function()
 		local buf
 
 		before_each(function()
-			buf = make_buf({
+			buf = make_buf("python", {
 				"preamble", -- 0
 				"# %%", -- 1
 				"x = 1", -- 2
@@ -146,6 +148,59 @@ describe("jupyter.cell", function()
 			assert.equals("markdown", c.cell_type)
 			assert.equals(3, c.start_row)
 			assert.equals(5, c.end_row)
+		end)
+	end)
+
+	describe("supported_filetypes", function()
+		it("lists python, julia, and r", function()
+			local fts = cell.supported_filetypes()
+			table.sort(fts)
+			assert.same({ "julia", "python", "r" }, fts)
+		end)
+	end)
+
+	describe("julia buffers", function()
+		it("splits the buffer at every # %% marker", function()
+			local buf = make_buf("julia", {
+				'println("preamble")',
+				"# %%",
+				"x = 1",
+				"y = 2",
+				"# %% [markdown]",
+				"# heading",
+			})
+			local cells = cell.get_all_cells(buf)
+			assert.equals(2, #cells)
+			assert.equals("code", cells[1].cell_type)
+			assert.same({ "# %%", "x = 1", "y = 2" }, cells[1].source)
+			assert.equals("markdown", cells[2].cell_type)
+		end)
+	end)
+
+	describe("r buffers", function()
+		it("splits the buffer at every # %% marker", function()
+			local buf = make_buf("r", {
+				"# preamble",
+				"# %%",
+				"x <- 1",
+				"y <- 2",
+				"# %% [markdown]",
+				"# heading",
+			})
+			local cells = cell.get_all_cells(buf)
+			assert.equals(2, #cells)
+			assert.equals("code", cells[1].cell_type)
+			assert.same({ "# %%", "x <- 1", "y <- 2" }, cells[1].source)
+			assert.equals("markdown", cells[2].cell_type)
+		end)
+	end)
+
+	describe("unsupported filetypes", function()
+		it("error out when there is no query for the filetype", function()
+			local buf = make_buf("ruby", { "# %%", "x = 1" })
+			assert.has_error(function()
+				cell.get_all_cells(buf)
+			end)
 		end)
 	end)
 end)

@@ -34,6 +34,7 @@ local function named_buf(lines)
 	name_counter = name_counter + 1
 	local bufnr = helpers.scratch_buf(lines)
 	vim.api.nvim_buf_set_name(bufnr, ("/tmp/jupyter-lsp-spec-%d.py"):format(name_counter))
+	vim.bo[bufnr].filetype = "python"
 	return bufnr
 end
 

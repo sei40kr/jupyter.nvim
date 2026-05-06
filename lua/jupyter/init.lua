@@ -2,9 +2,9 @@
 ---
 ---``setup`` wires user options, registers the ``:Jupyter*`` user commands,
 ---and (optionally) installs a small set of buffer-local keymaps in
----``filetype=python`` buffers. Every command-shaped function lives on
----this module so users can map them directly without poking at internal
----submodules.
+---supported filetype buffers (see ``cell.supported_filetypes``). Every
+---command-shaped function lives on this module so users can map them
+---directly without poking at internal submodules.
 
 local config = require("jupyter.config")
 local cell = require("jupyter.cell")
@@ -48,6 +48,60 @@ local function get_kernel(bufnr)
 	return registry.get(bufnr)
 end
 
+---Per-filetype kernel selection. Each entry's `match` runs against the
+---list returned by ``KernelSpec.list()`` and the first hit wins.
+---@type table<string, fun(spec: jupyter_core.KernelSpec): boolean>[]
+local KERNEL_DEFAULTS_BY_FILETYPE = {
+	python = {
+		function(spec)
+			return spec.name == "python3"
+		end,
+		function(spec)
+			return spec.language == "python"
+		end,
+	},
+	julia = {
+		function(spec)
+			return spec.name == "julia"
+		end,
+		function(spec)
+			return spec.name:match("^julia") ~= nil
+		end,
+		function(spec)
+			return spec.language == "julia"
+		end,
+	},
+	r = {
+		function(spec)
+			return spec.name == "ir"
+		end,
+		function(spec)
+			return (spec.language or ""):lower() == "r"
+		end,
+	},
+}
+
+---Pick a kernelspec name based on `bufnr`'s filetype. Returns nil when
+---no installed spec matches any of the rules.
+---@param bufnr integer
+---@return string?
+local function default_kernel_for_filetype(bufnr)
+	local rules = KERNEL_DEFAULTS_BY_FILETYPE[vim.bo[bufnr].filetype]
+	if rules == nil then
+		return nil
+	end
+	local kernel_spec = require("jupyter_core").KernelSpec
+	local specs = kernel_spec.list()
+	for _, predicate in ipairs(rules) do
+		for _, spec in ipairs(specs) do
+			if predicate(spec) then
+				return spec.name
+			end
+		end
+	end
+	return nil
+end
+
 ---@param spec_name string
 ---@param bufnr integer
 local function start_with_spec(spec_name, bufnr)
@@ -88,9 +142,11 @@ local function prompt_and_start(bufnr)
 	end)
 end
 
----Start a kernel for the current buffer. If `spec_name` omitted, uses
----``config.default_kernel``; if that's also nil, prompts via
----``vim.ui.select`` with the result of ``KernelSpec.list()``.
+---Start a kernel for the current buffer. Resolution order:
+---  1. explicit ``spec_name`` argument
+---  2. ``config.default_kernel``
+---  3. installed kernelspec matching the buffer's filetype
+---  4. ``vim.ui.select`` prompt
 ---@param spec_name string?
 function M.start_kernel(spec_name)
 	local bufnr = current_buf()
@@ -101,6 +157,11 @@ function M.start_kernel(spec_name)
 	local default = cfg().default_kernel
 	if default ~= nil and default ~= "" then
 		start_with_spec(default, bufnr)
+		return
+	end
+	local ft_default = default_kernel_for_filetype(bufnr)
+	if ft_default ~= nil then
+		start_with_spec(ft_default, bufnr)
 		return
 	end
 	prompt_and_start(bufnr)
@@ -332,7 +393,7 @@ local function install_default_keymaps()
 	local group = vim.api.nvim_create_augroup(DEFAULT_KEYMAPS_AUGROUP, { clear = true })
 	vim.api.nvim_create_autocmd("FileType", {
 		group = group,
-		pattern = "python",
+		pattern = cell.supported_filetypes(),
 		callback = function(ev)
 			for _, m in ipairs(DEFAULT_KEYMAPS) do
 				vim.keymap.set(m.mode, m.lhs, m.rhs, {

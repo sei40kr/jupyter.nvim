@@ -4,10 +4,12 @@
 ---buffers and scoped overrides for ``vim.fn.Jupyter*`` RPC stubs.
 local M = {}
 
----@param lines string[]|nil  -- defaults to an empty buffer
+---@param lines string[]|nil    -- defaults to an empty buffer
+---@param filetype string|nil   -- defaults to "python" (cell detection requires a supported filetype)
 ---@return integer  -- bufnr of the new hidden scratch buffer
-function M.scratch_buf(lines)
+function M.scratch_buf(lines, filetype)
 	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.bo[bufnr].filetype = filetype or "python"
 	if lines and #lines > 0 then
 		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 	end

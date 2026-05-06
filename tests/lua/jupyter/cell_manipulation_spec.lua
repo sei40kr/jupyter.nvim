@@ -9,6 +9,7 @@ local cell = require("jupyter.cell")
 ---@return integer
 local function make_buf(lines)
 	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.bo[bufnr].filetype = "python"
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 	return bufnr
 end
