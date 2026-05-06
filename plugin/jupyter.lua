@@ -11,6 +11,11 @@ if vim.g.loaded_jupyter == 1 then
 end
 vim.g.loaded_jupyter = 1
 
+-- ipynb round-trip is independent of the editor module's user commands:
+-- the BufReadCmd needs to be live before the user runs `nvim foo.ipynb`,
+-- so register it eagerly rather than waiting for a lazy-command shim.
+require("jupyter.format").setup()
+
 local LAZY_COMMANDS = {
 	"JupyterStart",
 	"JupyterStop",

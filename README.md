@@ -14,9 +14,11 @@ and get kernel-backed completion and hover — without leaving the editor.
 ## Status
 
 > [!IMPORTANT]
-> Early / Phase 1. Today the plugin operates on Python, Julia, and R
-> source files using the percent format (`# %%`). Round-trip conversion
-> with `.ipynb` lands in Phase 2 — see [Roadmap](#roadmap).
+> Early. Phase 1 covers Python, Julia, and R source files using the
+> percent format (`# %%`); Phase 2 adds round-trip conversion with
+> `.ipynb` — opening a notebook expands the JSON into the percent format
+> in the buffer, and `:w` writes it back as JSON with outputs and
+> metadata for unchanged cells preserved.
 
 ## Features
 
@@ -31,6 +33,10 @@ and get kernel-backed completion and hover — without leaving the editor.
   shown as extmarks below each cell. The buffer is never modified.
 - **Cell navigation and editing** — jump between cells, insert above /
   below, delete, merge, split.
+- **`.ipynb` round-trip** — opening a notebook expands it into the
+  percent format in the buffer; `:w` writes the JSON back, preserving
+  outputs, cell ids, and metadata for cells whose source has not
+  changed (see [`.ipynb` round-trip](#ipynb-round-trip)).
 - **In-process virtual LSP** — a Lua-`cmd` LSP server registered with
   `vim.lsp.start` exposes `textDocument/completion` and `textDocument/hover`
   backed by the kernel's `complete_request` / `inspect_request`. Any
@@ -55,7 +61,7 @@ writing; check the project for its current state.
 | Inline images / rich MIME     | Planned (Phase 2)                     | Yes (image.nvim)         |
 | Kernel-backed completion      | Yes — generic LSP source              | No                       |
 | Kernel-backed hover           | Yes — generic LSP source              | No                       |
-| `.ipynb` round-trip           | Planned (Phase 2)                     | Via jupytext             |
+| `.ipynb` round-trip           | Yes — load expands to percent, save writes JSON | Via jupytext             |
 | Multi-buffer / multi-kernel   | Yes (one kernel per buffer)           | Yes                      |
 | Non-blocking completion/hover | Yes — async RPC, editor stays responsive while a cell is running | N/A (no kernel completion) |
 
@@ -118,6 +124,11 @@ import math
 1. `:JupyterStart` — pick a kernelspec (or pass one: `:JupyterStart python3`).
 2. Place the cursor inside a cell and run `:JupyterExecute`.
 3. Output appears below the cell as virtual text.
+
+The same workflow applies to `.ipynb` notebooks. `nvim foo.ipynb`
+expands the JSON into percent format in the buffer; edit and execute
+cells normally, then `:w` to round-trip back to the file on disk. See
+[`.ipynb` round-trip](#ipynb-round-trip).
 
 There are **no default keymaps** unless `create_default_keymaps = true` is
 passed to `setup`. When enabled, the plugin installs the following
@@ -233,13 +244,29 @@ LSP client ever blocks on a kernel round-trip.
 See [`CLAUDE.md`](CLAUDE.md) for the full architecture, repository layout,
 module responsibilities, and design rationale.
 
+## `.ipynb` round-trip
+
+Opening any `*.ipynb` file routes through `BufReadCmd`: the JSON is
+parsed, cells are expanded into percent format, and the buffer's
+filetype is set from `metadata.kernelspec.language` (falling back to
+`metadata.language_info.name`, then `python`). The original document is
+stashed on `b:jupyter_ipynb`.
+
+Saving with `:w` is the symmetric `BufWriteCmd`: the buffer is
+re-parsed by `jupyter.cell`, cells are matched against the stashed
+document by position, and a new JSON file is written. For cells whose
+source is unchanged, the cell id, metadata, `execution_count`, and
+`outputs` are preserved verbatim. When the source changes the cell id
+is preserved but outputs are dropped; when the cell type changes a
+fresh id is minted.
+
+See [`examples/example.ipynb`](examples/example.ipynb) for a runnable
+notebook.
+
 ## Roadmap
 
-Phase 2 (planned, not yet implemented):
+Phase 2 (in progress):
 
-- Round-trip conversion with `.ipynb` — load a notebook into the buffer as
-  percent format, save back as `.ipynb` while preserving metadata and
-  execution outputs.
 - Content-type-aware output rendering — pretty-print JSON, format
   tracebacks, surface `image/*` and `text/html` inline where feasible.
 - Enhanced cell visualization — execution counters, timestamps, and
