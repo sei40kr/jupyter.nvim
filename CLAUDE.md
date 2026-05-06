@@ -24,9 +24,14 @@ Boundary rule: `jupyter_core` must contain no editor concepts (no buffers, no ex
 
 ## Supported File Formats
 
-- **Phase 1 (initial):** Python files using percent format (`# %%`) only.
-  - Edited and saved as ordinary `.py` files.
-  - Cell boundaries are detected via Treesitter.
+- **Phase 1 (initial):** Python, Julia, and R source files using the
+  percent format (`# %%`).
+  - Edited and saved as ordinary `.py` / `.jl` / `.R` files.
+  - Cell markers are the same across all three languages — `#` is the
+    line-comment character in each, so Jupytext's `# %%` convention
+    works uniformly.
+  - Cell boundaries are detected via Treesitter; one query lives at
+    `queries/<lang>/jupyter.scm` per supported language.
 - **Phase 2 (later):** automatic round-trip conversion with `.ipynb`.
   - On load: `.ipynb` → percent format expanded into the buffer.
   - On save: percent format → `.ipynb`.
@@ -37,7 +42,9 @@ Boundary rule: `jupyter_core` must contain no editor concepts (no buffers, no ex
 ### 1. Cell Detection (Treesitter)
 
 - A Treesitter query detects `# %%` markers and extracts code-block ranges.
-- The query lives at `queries/python/jupyter.scm`.
+- One query per supported language lives at `queries/<lang>/jupyter.scm`
+  (Phase 1: `python`, `julia`, `r`). The Lua side maps the buffer's
+  filetype to the matching language before fetching the query.
 - Cell type (code / markdown) is distinguished by the marker variant (`# %%` vs `# %% [markdown]`).
 
 ### 2. Cell Execution
@@ -136,8 +143,10 @@ rplugin/python3/
 ├── __init__.py
 └── jupyter_plugin.py           # Python remote plugin (jupyter_client wrapper)
 
-queries/python/
-└── jupyter.scm                 # Treesitter query for cell detection
+queries/
+├── python/jupyter.scm          # Treesitter cell-marker query (Python)
+├── julia/jupyter.scm           # Treesitter cell-marker query (Julia)
+└── r/jupyter.scm               # Treesitter cell-marker query (R)
 ```
 
 ## Module Responsibilities
@@ -225,13 +234,19 @@ Exported RPC functions:
 Entry point. Registers commands, keymaps, autocmds.
 
 - `setup(opts)` — initialize the plugin.
-- `start_kernel(spec_name?)` — start a kernel for the current buffer (delegates to `jupyter_core.Kernel.start`).
+- `start_kernel(spec_name?)` — start a kernel for the current buffer
+  (delegates to `jupyter_core.Kernel.start`). When no `spec_name` is
+  given, falls back to `config.default_kernel`, then a filetype-based
+  default (`python` → `python3`, `julia` → first `julia*`, `r` → `ir`),
+  then a `vim.ui.select` prompt.
 - `stop_kernel()` / `restart_kernel()`.
 - `execute_cell()` — execute the cell under the cursor.
 - `next_cell()` / `prev_cell()` — navigate between cells.
 - `insert_cell_below()` / `insert_cell_above()` — create new cells.
 
-The buffer-local kernel is stored in `vim.b[bufnr].jupyter_kernel`.
+The buffer-local kernel is held in an in-process `jupyter.registry`
+table keyed by bufnr (a Lua table that preserves Kernel methods, unlike
+`vim.b`).
 
 #### `config.lua`
 
@@ -239,8 +254,11 @@ Validates and merges user options with defaults.
 
 #### `cell.lua`
 
-Cell detection and manipulation backed by a Treesitter query.
+Cell detection and manipulation backed by a Treesitter query. Maps the
+buffer's filetype to a tree-sitter language (`python`, `julia`, `r`) and
+loads the corresponding `queries/<lang>/jupyter.scm` query.
 
+- `supported_filetypes()` — list the filetypes recognised as cell sources.
 - `get_cell_at(bufnr, row)` — return the cell containing the given row.
 - `get_all_cells(bufnr)` — return every cell in the buffer.
 - `next_cell(bufnr, row)` / `prev_cell(bufnr, row)`.

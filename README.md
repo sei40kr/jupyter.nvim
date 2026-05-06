@@ -14,14 +14,17 @@ and get kernel-backed completion and hover — without leaving the editor.
 ## Status
 
 > [!IMPORTANT]
-> Early / Phase 1. Today the plugin only operates on Python source files
-> using the percent format (`# %%`). Round-trip conversion with `.ipynb`
-> lands in Phase 2 — see [Roadmap](#roadmap).
+> Early / Phase 1. Today the plugin operates on Python, Julia, and R
+> source files using the percent format (`# %%`). Round-trip conversion
+> with `.ipynb` lands in Phase 2 — see [Roadmap](#roadmap).
 
 ## Features
 
 - **Cell detection via Treesitter** — `# %%` and `# %% [markdown]` markers
-  parsed from the buffer ([`queries/python/jupyter.scm`](queries/python/jupyter.scm)).
+  parsed from Python, Julia, and R buffers
+  ([`queries/python/jupyter.scm`](queries/python/jupyter.scm),
+  [`queries/julia/jupyter.scm`](queries/julia/jupyter.scm),
+  [`queries/r/jupyter.scm`](queries/r/jupyter.scm)).
 - **Cell execution against a live Jupyter kernel** — code dispatched
   through a Python remote plugin built on `jupyter_client`.
 - **Virtual-text output rendering** — results, streams, and tracebacks are
@@ -118,7 +121,7 @@ import math
 
 There are **no default keymaps** unless `create_default_keymaps = true` is
 passed to `setup`. When enabled, the plugin installs the following
-buffer-local maps in `filetype=python` buffers:
+buffer-local maps in supported buffers (`python`, `julia`, `r`):
 
 | Mapping            | Command               | Description           |
 | ------------------ | --------------------- | --------------------- |
@@ -166,7 +169,9 @@ vim.keymap.set("n", "[j",        "<Cmd>JupyterPrev<CR>",    { desc = "Prev cell"
 
 `:JupyterStart` accepts a kernelspec name and tab-completes the list returned
 by `jupyter kernelspec list`. Without an argument it uses `default_kernel`,
-or falls back to a `vim.ui.select` prompt.
+then falls back to a filetype-based default
+(`python` → `python3`, `julia` → first `julia*`, `r` → `ir`),
+and finally to a `vim.ui.select` prompt when no installed kernel matches.
 
 </details>
 
@@ -197,7 +202,8 @@ require("jupyter").setup({
   -- Register :Jupyter* user commands.
   create_user_commands = true,
 
-  -- Install buffer-local <localleader>j* keymaps in python buffers.
+  -- Install buffer-local <localleader>j* keymaps in supported buffers
+  -- (python, julia, r).
   create_default_keymaps = false,
 
   -- Auto-attach the in-process LSP (completion + hover) when a kernel starts.
