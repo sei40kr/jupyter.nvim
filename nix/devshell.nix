@@ -74,18 +74,10 @@ let
       ];
       customRC = ''
         lua << EOF
+          -- jupyter.nvim's virtual LSP exposes completion + hover, so blink
+          -- only needs its default LSP source — no plugin-specific provider.
           require("blink.cmp").setup({
-            sources = {
-              default = { "jupyter", "buffer" },
-              providers = {
-                jupyter = {
-                  name = "jupyter",
-                  module = "jupyter.completion.blink",
-                  score_offset = 100,
-                  async = false,
-                },
-              },
-            },
+            sources = { default = { "lsp", "buffer" } },
             keymap = { preset = "default" },
           })
         EOF

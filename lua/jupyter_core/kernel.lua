@@ -63,27 +63,41 @@ function Kernel:execute(code)
 	return outputs
 end
 
+---Async ``complete_request``. The callback fires once on the main loop
+---with ``(err, result)``. ``err`` is a string when the rplugin worker
+---raised; otherwise ``result`` carries matches and the replacement range.
 ---@param code string
 ---@param cursor_pos integer
----@return jupyter_core.CompletionResult
-function Kernel:complete(code, cursor_pos)
-	local raw = rpc.complete(self.id, code, cursor_pos)
-	return {
-		matches = raw.matches,
-		cursor_start = raw.cursor_start,
-		cursor_end = raw.cursor_end,
-	}
+---@param callback fun(err: string?, result: jupyter_core.CompletionResult?)
+function Kernel:complete_async(code, cursor_pos, callback)
+	rpc.complete_async(self.id, code, cursor_pos, function(err, raw)
+		if err ~= nil or raw == nil then
+			callback(err, nil)
+			return
+		end
+		callback(nil, {
+			matches = raw.matches,
+			cursor_start = raw.cursor_start,
+			cursor_end = raw.cursor_end,
+		})
+	end)
 end
 
+---Async ``inspect_request``. See ``complete_async``.
 ---@param code string
 ---@param cursor_pos integer
----@return jupyter_core.InspectResult
-function Kernel:inspect(code, cursor_pos)
-	local raw = rpc.inspect(self.id, code, cursor_pos)
-	return {
-		found = raw.found,
-		data = raw.data or {},
-	}
+---@param callback fun(err: string?, result: jupyter_core.InspectResult?)
+function Kernel:inspect_async(code, cursor_pos, callback)
+	rpc.inspect_async(self.id, code, cursor_pos, function(err, raw)
+		if err ~= nil or raw == nil then
+			callback(err, nil)
+			return
+		end
+		callback(nil, {
+			found = raw.found,
+			data = raw.data or {},
+		})
+	end)
 end
 
 return Kernel

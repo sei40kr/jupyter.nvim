@@ -12,6 +12,7 @@ local execute = require("jupyter.execute")
 local display = require("jupyter.display")
 local hover_mod = require("jupyter.hover")
 local registry = require("jupyter.registry")
+local lsp = require("jupyter.lsp")
 
 local M = {}
 
@@ -58,6 +59,9 @@ local function start_with_spec(spec_name, bufnr)
 	local Kernel = require("jupyter_core").Kernel
 	local kernel = Kernel.start(spec_name)
 	registry.set(bufnr, kernel)
+	if cfg().virtual_lsp then
+		lsp.attach(bufnr)
+	end
 end
 
 ---Prompt the user to pick a kernelspec when neither an argument nor a
@@ -112,6 +116,7 @@ function M.stop_kernel()
 	kernel:stop()
 	registry.clear(bufnr)
 	display.clear_all(bufnr)
+	lsp.detach(bufnr)
 end
 
 function M.restart_kernel()

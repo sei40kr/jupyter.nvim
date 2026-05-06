@@ -84,21 +84,26 @@ function M.hover(bufnr)
 	local code = table.concat(cur_cell.source, "\n")
 	local cursor_pos = byte_offset(cur_cell.source, cur_cell.start_row, cursor_row, cursor_col)
 
-	local result = kernel:inspect(code, cursor_pos)
-	if not result.found then
-		vim.notify("jupyter: no information available", vim.log.levels.INFO)
-		return
-	end
+	kernel:inspect_async(code, cursor_pos, function(err, result)
+		if err ~= nil then
+			vim.notify(("jupyter: inspect failed: %s"):format(err), vim.log.levels.WARN)
+			return
+		end
+		if result == nil or not result.found then
+			vim.notify("jupyter: no information available", vim.log.levels.INFO)
+			return
+		end
 
-	local body, filetype = pick_representation(result.data)
-	if body == "" then
-		vim.notify("jupyter: no information available", vim.log.levels.INFO)
-		return
-	end
+		local body, filetype = pick_representation(result.data)
+		if body == "" then
+			vim.notify("jupyter: no information available", vim.log.levels.INFO)
+			return
+		end
 
-	local stripped = strip_ansi(body)
-	local lines = vim.split(stripped, "\n", { plain = true })
-	vim.lsp.util.open_floating_preview(lines, filetype, { border = "rounded" })
+		local stripped = strip_ansi(body)
+		local lines = vim.split(stripped, "\n", { plain = true })
+		vim.lsp.util.open_floating_preview(lines, filetype, { border = "rounded" })
+	end)
 end
 
 return M

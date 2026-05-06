@@ -11,6 +11,7 @@ local M = {}
 ---@field display jupyter.display.Config?
 ---@field create_user_commands boolean      default true
 ---@field create_default_keymaps boolean    default false (document recommended maps)
+---@field virtual_lsp boolean               auto-attach the in-process LSP when a kernel starts (default true)
 
 ---@type jupyter.Config
 M.defaults = {
@@ -18,6 +19,7 @@ M.defaults = {
 	display = nil,
 	create_user_commands = true,
 	create_default_keymaps = false,
+	virtual_lsp = true,
 }
 
 ---@type table<string, type|type[]>
@@ -26,6 +28,7 @@ local TYPE_CHECKS = {
 	display = "table",
 	create_user_commands = "boolean",
 	create_default_keymaps = "boolean",
+	virtual_lsp = "boolean",
 }
 
 ---@param key string

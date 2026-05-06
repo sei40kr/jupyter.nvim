@@ -17,6 +17,8 @@
 ---@field display_name string
 ---@field language string
 
+local async = require("jupyter_core.async")
+
 local M = {}
 
 ---@param kernel_id string
@@ -42,20 +44,25 @@ function M.execute_code(kernel_id, code)
 	return vim.fn.JupyterExecuteCode(kernel_id, code)
 end
 
+---Dispatch an async ``complete_request``. The reply is delivered via
+---``jupyter_core.async`` to ``callback(err, raw)``.
 ---@param kernel_id string
 ---@param code string
 ---@param cursor_pos integer
----@return jupyter_core.rpc.RawCompletion
-function M.complete(kernel_id, code, cursor_pos)
-	return vim.fn.JupyterComplete(kernel_id, code, cursor_pos)
+---@param callback fun(err: string?, result: jupyter_core.rpc.RawCompletion?)
+function M.complete_async(kernel_id, code, cursor_pos, callback)
+	local req_id = async.register(callback)
+	vim.fn.JupyterCompleteAsync(req_id, kernel_id, code, cursor_pos)
 end
 
+---Dispatch an async ``inspect_request``. See ``complete_async``.
 ---@param kernel_id string
 ---@param code string
 ---@param cursor_pos integer
----@return jupyter_core.rpc.RawInspect
-function M.inspect(kernel_id, code, cursor_pos)
-	return vim.fn.JupyterInspect(kernel_id, code, cursor_pos)
+---@param callback fun(err: string?, result: jupyter_core.rpc.RawInspect?)
+function M.inspect_async(kernel_id, code, cursor_pos, callback)
+	local req_id = async.register(callback)
+	vim.fn.JupyterInspectAsync(req_id, kernel_id, code, cursor_pos)
 end
 
 ---@return jupyter_core.rpc.RawKernelSpec[]

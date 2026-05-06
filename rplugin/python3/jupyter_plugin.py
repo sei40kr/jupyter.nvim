@@ -3,11 +3,21 @@
 This module hosts the ``Jupyter*`` RPC functions consumed by the
 ``jupyter_core`` Lua module. It owns no editor state — only a registry of
 running kernels, keyed by an opaque id supplied by the Lua side.
+
+Each kernel runs in its own dedicated worker thread. ZMQ sockets are
+thread-bound, so every channel operation must happen on the thread that
+opened the channels; cross-thread access raises ``Socket operation on
+non-socket``. Sync RPCs block on a future submitted to the worker; async
+RPCs return immediately and route the reply back to Lua via
+``nvim.async_call`` + ``nvim.exec_lua``.
 """
 
 from __future__ import annotations
 
 import queue
+import threading
+from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Any, cast
 
 import pynvim
@@ -17,15 +27,107 @@ from jupyter_client.manager import KernelManager
 
 _SHELL_TIMEOUT_SECONDS: float = 30.0
 _IOPUB_TIMEOUT_SECONDS: float = 30.0
+_KERNEL_START_TIMEOUT_SECONDS: float = 60.0
+_RPC_TIMEOUT_SECONDS: float = 60.0
+
+
+class _KernelWorker:
+    """A kernel + its dedicated worker thread.
+
+    All channel operations (``client.complete``, ``client.execute``, …)
+    are submitted to this thread via :meth:`submit`. Sync callers block
+    on ``future.result()``; async callers attach ``done_callback``.
+    """
+
+    def __init__(self, spec_name: str) -> None:
+        self._spec_name: str = spec_name
+        self._queue: queue.Queue[
+            tuple[Callable[[BlockingKernelClient], Any], Future[Any]] | None
+        ] = queue.Queue()
+        self._ready: threading.Event = threading.Event()
+        self._start_error: BaseException | None = None
+        self._manager: KernelManager | None = None
+        self._client: BlockingKernelClient | None = None
+        self._thread: threading.Thread = threading.Thread(
+            target=self._run,
+            name=f"jupyter-kernel-{spec_name}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def wait_ready(self, timeout: float) -> None:
+        if not self._ready.wait(timeout=timeout):
+            raise TimeoutError(f"timed out starting kernel {self._spec_name!r}")
+        if self._start_error is not None:
+            raise self._start_error
+
+    @property
+    def client(self) -> BlockingKernelClient:
+        if self._client is None:
+            raise RuntimeError("kernel client not initialized")
+        return self._client
+
+    @property
+    def manager(self) -> KernelManager:
+        if self._manager is None:
+            raise RuntimeError("kernel manager not initialized")
+        return self._manager
+
+    def submit(self, fn: Callable[[BlockingKernelClient], Any]) -> Future[Any]:
+        future: Future[Any] = Future()
+        self._queue.put((fn, future))
+        return future
+
+    def stop(self) -> None:
+        self._queue.put(None)
+        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+
+    def _run(self) -> None:
+        try:
+            manager = KernelManager(kernel_name=self._spec_name)
+            manager.start_kernel()
+            client = cast(BlockingKernelClient, manager.client())
+            client.start_channels()
+            client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
+        except BaseException as exc:  # pragma: no cover — propagated to wait_ready
+            self._start_error = exc
+            self._ready.set()
+            return
+
+        self._manager = manager
+        self._client = client
+        self._ready.set()
+
+        while True:
+            item = self._queue.get()
+            if item is None:
+                self._shutdown(manager, client)
+                return
+            fn, future = item
+            if future.cancelled():
+                continue
+            try:
+                result = fn(client)
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+
+    @staticmethod
+    def _shutdown(manager: KernelManager, client: BlockingKernelClient) -> None:
+        try:
+            client.stop_channels()
+        finally:
+            manager.shutdown_kernel(now=True)
 
 
 @pynvim.plugin
 class JupyterPlugin:
-    """Proxies a registry of Jupyter kernels behind synchronous RPC calls."""
+    """Per-kernel worker threads behind sync + async RPC entry points."""
 
     def __init__(self, nvim: pynvim.Nvim) -> None:
         self._nvim: pynvim.Nvim = nvim
-        self._kernels: dict[str, tuple[KernelManager, BlockingKernelClient]] = {}
+        self._kernels: dict[str, _KernelWorker] = {}
         self._spec_manager: KernelSpecManager = KernelSpecManager()
 
     # ------------------------------------------------------------------
@@ -41,35 +143,37 @@ class JupyterPlugin:
         if kernel_id_s in self._kernels:
             raise ValueError(f"kernel already started: {kernel_id_s}")
 
-        manager = KernelManager(kernel_name=spec_name_s)
-        manager.start_kernel()
-        client = cast(BlockingKernelClient, manager.client())
-        client.start_channels()
-        client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
-        self._kernels[kernel_id_s] = (manager, client)
+        worker = _KernelWorker(spec_name_s)
+        try:
+            worker.wait_ready(timeout=_KERNEL_START_TIMEOUT_SECONDS)
+        except BaseException:
+            worker.stop()
+            raise
+        self._kernels[kernel_id_s] = worker
 
     @pynvim.function("JupyterStopKernel", sync=True)
     def stop_kernel(self, args: list[Any]) -> None:
         (kernel_id,) = _expect_args(args, 1, ("kernel_id",))
         kernel_id_s = _as_str(kernel_id, "kernel_id")
 
-        entry = self._kernels.pop(kernel_id_s, None)
-        if entry is None:
+        worker = self._kernels.pop(kernel_id_s, None)
+        if worker is None:
             return
-        manager, client = entry
-        try:
-            client.stop_channels()
-        finally:
-            manager.shutdown_kernel(now=True)
+        worker.stop()
 
     @pynvim.function("JupyterRestartKernel", sync=True)
     def restart_kernel(self, args: list[Any]) -> None:
         (kernel_id,) = _expect_args(args, 1, ("kernel_id",))
         kernel_id_s = _as_str(kernel_id, "kernel_id")
 
-        manager, client = self._lookup(kernel_id_s)
-        manager.restart_kernel(now=True)
-        client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
+        worker = self._lookup(kernel_id_s)
+
+        def _do(client: BlockingKernelClient) -> None:
+            del client  # we use the manager directly
+            worker.manager.restart_kernel(now=True)
+            worker.client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
+
+        worker.submit(_do).result(timeout=_RPC_TIMEOUT_SECONDS)
 
     @pynvim.function("JupyterExecuteCode", sync=True)
     def execute_code(self, args: list[Any]) -> list[dict[str, Any]]:
@@ -77,49 +181,78 @@ class JupyterPlugin:
         kernel_id_s = _as_str(kernel_id, "kernel_id")
         code_s = _as_str(code, "code")
 
-        _, client = self._lookup(kernel_id_s)
-        msg_id = client.execute(code_s, store_history=False, allow_stdin=False)
-        return _drain_iopub_for(client, msg_id)
+        worker = self._lookup(kernel_id_s)
 
-    @pynvim.function("JupyterComplete", sync=True)
-    def complete(self, args: list[Any]) -> dict[str, Any]:
-        kernel_id, code, cursor_pos = _expect_args(args, 3, ("kernel_id", "code", "cursor_pos"))
+        def _do(client: BlockingKernelClient) -> list[dict[str, Any]]:
+            msg_id = client.execute(code_s, store_history=False, allow_stdin=False)
+            return _drain_iopub_for(client, msg_id)
+
+        return cast(
+            list[dict[str, Any]],
+            worker.submit(_do).result(timeout=_RPC_TIMEOUT_SECONDS),
+        )
+
+    @pynvim.function("JupyterCompleteAsync", sync=False)
+    def complete_async(self, args: list[Any]) -> None:
+        req_id, kernel_id, code, cursor_pos = _expect_args(
+            args, 4, ("req_id", "kernel_id", "code", "cursor_pos")
+        )
+        req_id_i = _as_int(req_id, "req_id")
         kernel_id_s = _as_str(kernel_id, "kernel_id")
         code_s = _as_str(code, "code")
         cursor_pos_i = _as_int(cursor_pos, "cursor_pos")
 
-        _, client = self._lookup(kernel_id_s)
-        msg_id = client.complete(code_s, cursor_pos_i)
-        reply = _wait_for_shell_reply(client, msg_id, "complete_reply")
-        content = _content(reply)
+        try:
+            worker = self._lookup(kernel_id_s)
+        except Exception as exc:
+            self._dispatch_resolve(req_id_i, str(exc), None)
+            return
 
-        result: dict[str, Any] = {
-            "matches": [str(m) for m in (content.get("matches") or [])],
-            "cursor_start": int(content.get("cursor_start", cursor_pos_i)),
-            "cursor_end": int(content.get("cursor_end", cursor_pos_i)),
-        }
-        metadata = content.get("metadata")
-        if isinstance(metadata, dict):
-            result["metadata"] = dict(metadata)
-        return result
+        def _do(client: BlockingKernelClient) -> dict[str, Any]:
+            msg_id = client.complete(code_s, cursor_pos_i)
+            reply = _wait_for_shell_reply(client, msg_id, "complete_reply")
+            content = _content(reply)
+            result: dict[str, Any] = {
+                "matches": [str(m) for m in (content.get("matches") or [])],
+                "cursor_start": int(content.get("cursor_start", cursor_pos_i)),
+                "cursor_end": int(content.get("cursor_end", cursor_pos_i)),
+            }
+            metadata = content.get("metadata")
+            if isinstance(metadata, dict):
+                result["metadata"] = dict(metadata)
+            return result
 
-    @pynvim.function("JupyterInspect", sync=True)
-    def inspect(self, args: list[Any]) -> dict[str, Any]:
-        kernel_id, code, cursor_pos = _expect_args(args, 3, ("kernel_id", "code", "cursor_pos"))
+        future = worker.submit(_do)
+        future.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
+
+    @pynvim.function("JupyterInspectAsync", sync=False)
+    def inspect_async(self, args: list[Any]) -> None:
+        req_id, kernel_id, code, cursor_pos = _expect_args(
+            args, 4, ("req_id", "kernel_id", "code", "cursor_pos")
+        )
+        req_id_i = _as_int(req_id, "req_id")
         kernel_id_s = _as_str(kernel_id, "kernel_id")
         code_s = _as_str(code, "code")
         cursor_pos_i = _as_int(cursor_pos, "cursor_pos")
 
-        _, client = self._lookup(kernel_id_s)
-        msg_id = client.inspect(code_s, cursor_pos_i)
-        reply = _wait_for_shell_reply(client, msg_id, "inspect_reply")
-        content = _content(reply)
+        try:
+            worker = self._lookup(kernel_id_s)
+        except Exception as exc:
+            self._dispatch_resolve(req_id_i, str(exc), None)
+            return
 
-        data = content.get("data")
-        return {
-            "found": bool(content.get("found", False)),
-            "data": dict(data) if isinstance(data, dict) else {},
-        }
+        def _do(client: BlockingKernelClient) -> dict[str, Any]:
+            msg_id = client.inspect(code_s, cursor_pos_i)
+            reply = _wait_for_shell_reply(client, msg_id, "inspect_reply")
+            content = _content(reply)
+            data = content.get("data")
+            return {
+                "found": bool(content.get("found", False)),
+                "data": dict(data) if isinstance(data, dict) else {},
+            }
+
+        future = worker.submit(_do)
+        future.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
 
     @pynvim.function("JupyterListKernelspecs", sync=True)
     def list_kernelspecs(self, args: list[Any]) -> list[dict[str, Any]]:
@@ -143,11 +276,29 @@ class JupyterPlugin:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _lookup(self, kernel_id: str) -> tuple[KernelManager, BlockingKernelClient]:
+    def _lookup(self, kernel_id: str) -> _KernelWorker:
         try:
             return self._kernels[kernel_id]
         except KeyError as exc:
             raise ValueError(f"unknown kernel id: {kernel_id}") from exc
+
+    def _on_async_done(self, req_id: int, future: Future[Any]) -> None:
+        try:
+            result = future.result()
+        except BaseException as exc:
+            self._dispatch_resolve(req_id, str(exc), None)
+            return
+        self._dispatch_resolve(req_id, None, result)
+
+    def _dispatch_resolve(
+        self, req_id: int, err: str | None, result: dict[str, Any] | None
+    ) -> None:
+        """Schedule the Lua resolver on the nvim main thread."""
+
+        self._nvim.async_call(self._resolve, req_id, err, result)
+
+    def _resolve(self, req_id: int, err: str | None, result: dict[str, Any] | None) -> None:
+        self._nvim.exec_lua("require('jupyter_core.async')._resolve(...)", req_id, err, result)
 
 
 def _drain_iopub_for(client: BlockingKernelClient, msg_id: str) -> list[dict[str, Any]]:

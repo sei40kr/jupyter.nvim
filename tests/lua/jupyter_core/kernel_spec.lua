@@ -1,15 +1,27 @@
----@diagnostic disable: undefined-field
+---@diagnostic disable: undefined-field, need-check-nil, unused-local
+package.loaded["jupyter_core.async"] = nil
+package.loaded["jupyter_core.rpc"] = nil
+package.loaded["jupyter_core.kernel"] = nil
 local Kernel = require("jupyter_core.kernel")
+local async = require("jupyter_core.async")
 
 local STUBBED_FUNCTIONS = {
 	"JupyterStartKernel",
 	"JupyterStopKernel",
 	"JupyterRestartKernel",
 	"JupyterExecuteCode",
-	"JupyterComplete",
-	"JupyterInspect",
+	"JupyterCompleteAsync",
+	"JupyterInspectAsync",
 	"JupyterListKernelspecs",
 }
+
+---Drain ``vim.schedule`` callbacks so async resolutions deliver before
+---the assertion runs.
+local function flush()
+	vim.wait(50, function()
+		return false
+	end, 5)
+end
 
 local function install_stubs(handlers)
 	local calls = {}
@@ -123,54 +135,111 @@ describe("jupyter_core.Kernel:execute", function()
 	end)
 end)
 
-describe("jupyter_core.Kernel:complete", function()
-	it("returns a typed CompletionResult", function()
+describe("jupyter_core.Kernel:complete_async", function()
+	it("returns a typed CompletionResult via the callback", function()
 		install_stubs({
-			JupyterComplete = function(_, code, cursor_pos)
+			JupyterCompleteAsync = function(req_id, _kernel_id, code, cursor_pos)
 				assert.equals("import o", code)
 				assert.equals(8, cursor_pos)
-				return {
-					matches = { "os", "operator" },
-					cursor_start = 7,
-					cursor_end = 8,
-				}
+				vim.schedule(function()
+					async._resolve(req_id, nil, {
+						matches = { "os", "operator" },
+						cursor_start = 7,
+						cursor_end = 8,
+					})
+				end)
 			end,
 		})
 
 		local kernel = Kernel.start("python3")
-		local result = kernel:complete("import o", 8)
-		assert.same({ "os", "operator" }, result.matches)
-		assert.equals(7, result.cursor_start)
-		assert.equals(8, result.cursor_end)
+		---@type {err: any, result: any}?
+		local got
+		kernel:complete_async("import o", 8, function(err, result)
+			got = { err = err, result = result }
+		end)
+		flush()
+		flush()
+
+		assert.is_truthy(got)
+		assert.is_nil(got.err)
+		assert.same({ "os", "operator" }, got.result.matches)
+		assert.equals(7, got.result.cursor_start)
+		assert.equals(8, got.result.cursor_end)
+	end)
+
+	it("propagates worker errors through the err parameter", function()
+		install_stubs({
+			JupyterCompleteAsync = function(req_id)
+				vim.schedule(function()
+					async._resolve(req_id, "boom", nil)
+				end)
+			end,
+		})
+
+		local kernel = Kernel.start("python3")
+		---@type {err: any, result: any}?
+		local got
+		kernel:complete_async("x", 1, function(err, result)
+			got = { err = err, result = result }
+		end)
+		flush()
+		flush()
+
+		assert.is_truthy(got)
+		assert.equals("boom", got.err)
+		assert.is_nil(got.result)
 	end)
 end)
 
-describe("jupyter_core.Kernel:inspect", function()
+describe("jupyter_core.Kernel:inspect_async", function()
 	it("returns a typed InspectResult when the symbol is found", function()
 		install_stubs({
-			JupyterInspect = function()
-				return {
-					found = true,
-					data = { ["text/plain"] = "Help on built-in function len" },
-				}
+			JupyterInspectAsync = function(req_id)
+				vim.schedule(function()
+					async._resolve(req_id, nil, {
+						found = true,
+						data = { ["text/plain"] = "Help on built-in function len" },
+					})
+				end)
 			end,
 		})
 
 		local kernel = Kernel.start("python3")
-		local result = kernel:inspect("len(", 4)
-		assert.is_true(result.found)
-		assert.equals("Help on built-in function len", result.data["text/plain"])
+		---@type {err: any, result: any}?
+		local got
+		kernel:inspect_async("len(", 4, function(err, result)
+			got = { err = err, result = result }
+		end)
+		flush()
+		flush()
+
+		assert.is_truthy(got)
+		assert.is_nil(got.err)
+		assert.is_true(got.result.found)
+		assert.equals("Help on built-in function len", got.result.data["text/plain"])
 	end)
 
 	it("returns found=false with empty data when the symbol is not found", function()
 		install_stubs({
-			JupyterInspect = function()
-				return { found = false }
+			JupyterInspectAsync = function(req_id)
+				vim.schedule(function()
+					async._resolve(req_id, nil, { found = false })
+				end)
 			end,
 		})
+
 		local kernel = Kernel.start("python3")
-		local result = kernel:inspect("xyznotreal", 10)
-		assert.is_false(result.found)
-		assert.same({}, result.data)
+		---@type {err: any, result: any}?
+		local got
+		kernel:inspect_async("xyznotreal", 10, function(err, result)
+			got = { err = err, result = result }
+		end)
+		flush()
+		flush()
+
+		assert.is_truthy(got)
+		assert.is_nil(got.err)
+		assert.is_false(got.result.found)
+		assert.same({}, got.result.data)
 	end)
 end)

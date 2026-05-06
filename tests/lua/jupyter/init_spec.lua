@@ -11,6 +11,7 @@ local JUPYTER_MODULES = {
 	"jupyter.execute",
 	"jupyter.display",
 	"jupyter.hover",
+	"jupyter.lsp",
 	"jupyter_core",
 	"jupyter_core.kernel",
 	"jupyter_core.kernel_spec",
@@ -62,6 +63,7 @@ local function reload_with_stubs(stubs)
 	package.loaded["jupyter.execute"] = stubs.execute
 	package.loaded["jupyter.display"] = stubs.display
 	package.loaded["jupyter.hover"] = stubs.hover
+	package.loaded["jupyter.lsp"] = stubs.lsp
 	-- Real cell module is fine: it has no side effects on require.
 	return require("jupyter")
 end
@@ -136,6 +138,20 @@ local function make_stubs()
 		end,
 	}
 
+	---@type {fn: string, bufnr: integer}[]
+	local lsp_calls = {}
+	local lsp = {
+		attach = function(bufnr)
+			lsp_calls[#lsp_calls + 1] = { fn = "attach", bufnr = bufnr }
+		end,
+		detach = function(bufnr)
+			lsp_calls[#lsp_calls + 1] = { fn = "detach", bufnr = bufnr }
+		end,
+		stop_all = function()
+			lsp_calls[#lsp_calls + 1] = { fn = "stop_all", bufnr = -1 }
+		end,
+	}
+
 	return {
 		jupyter_core = { Kernel = Kernel, KernelSpec = KernelSpec },
 		kernel_state = kernel_state,
@@ -145,6 +161,8 @@ local function make_stubs()
 		display_calls = display_calls,
 		hover = hover,
 		hover_calls = hover_calls,
+		lsp = lsp,
+		lsp_calls = lsp_calls,
 	}
 end
 

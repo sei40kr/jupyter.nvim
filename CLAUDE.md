@@ -55,20 +55,16 @@ Boundary rule: `jupyter_core` must contain no editor concepts (no buffers, no ex
 - Delete / merge / split cells.
 - Text object / visual selection that covers a whole cell.
 
-### 4. Completion
+### 4. Completion & Hover (virtual LSP)
 
-- Use the Jupyter kernel's `complete_request` (via `jupyter_core`) to provide completions based on the live kernel context.
-- Integration targets:
-  - **nvim-cmp** source.
-  - **blink.cmp** provider.
+- A single in-process LSP server, registered via `vim.lsp.start` with a Lua `cmd` function, exposes:
+  - `textDocument/completion` backed by the kernel's `complete_request`.
+  - `textDocument/hover` backed by the kernel's `inspect_request`.
+- Any LSP-aware client (Neovim built-in, nvim-cmp, blink.cmp, …) gets kernel-backed completions and docs through their generic LSP source — **no plugin-specific adapter is needed**.
+- Position encoding is declared as `utf-8` so LSP positions and Jupyter's byte-based `cursor_pos` use the same unit.
 - Aim to surface completions that pure static analysis (LSP) cannot — e.g. dynamic attributes, DataFrame column names, runtime-defined symbols.
 
-### 5. Hover
-
-- Use the Jupyter kernel's `inspect_request` (via `jupyter_core`) to fetch documentation / signature info for the symbol under the cursor.
-- Exposed as an API equivalent to `K` / `vim.lsp.buf.hover()`.
-
-### 6. (Future) Enhanced Cell Visualization
+### 5. (Future) Enhanced Cell Visualization
 
 - Use virtual text to decorate cell boundaries, execution counters, timestamps, etc.
 - Folding / highlighting for readability.
@@ -81,7 +77,7 @@ Boundary rule: `jupyter_core` must contain no editor concepts (no buffers, no ex
 │                                                    │
 │   Public API / Commands / Keymaps                  │
 │   Cell navigation · Display (virtual text) ·       │
-│   Completion (cmp / blink) · Hover ·               │
+│   Virtual LSP (completion + hover) ·               │
 │   Format conversion (Phase 2)                      │
 │   Treesitter cell detection                        │
 └──────────────────────┬─────────────────────────────┘
@@ -127,12 +123,10 @@ lua/
     ├── display.lua             # Virtual text / extmark output rendering
     │                           # (Phase 2: content-type-aware formatting)
     │
-    ├── hover.lua               # Hover feature
+    ├── hover.lua               # Hover entry point used by :JupyterHover
     │
-    ├── completion/
-    │   ├── init.lua            # Shared completion logic
-    │   ├── cmp.lua             # nvim-cmp source
-    │   └── blink.lua           # blink.cmp provider
+    ├── lsp.lua                 # In-process LSP server: completion + hover
+    │                           # backed by kernel.complete / kernel.inspect
     │
     └── format/                 # Phase 2
         ├── ipynb.lua           # .ipynb ↔ cell data conversion
@@ -278,13 +272,16 @@ Phase 1 renders the `text/plain` representation only. Phase 2 introduces content
 
 #### `hover.lua`
 
-Calls `jupyter_core.Kernel:inspect` and shows the result in Neovim's standard hover floating window.
+Calls `jupyter_core.Kernel:inspect` and shows the result in Neovim's standard hover floating window. Used by the `:JupyterHover` command for users who want explicit invocation; for the LSP-driven path, see `lsp.lua`.
 
-#### `completion/`
+#### `lsp.lua`
 
-- `cmp.lua` — source object for `cmp.register_source`.
-- `blink.lua` — provider definition for blink.cmp.
-- `init.lua` — shared completion logic (calls `jupyter_core.Kernel:complete`).
+In-process LSP server. Registered with `vim.lsp.start` using a Lua `cmd` function — no external process is spawned. Handles:
+
+- `textDocument/completion` → `jupyter_core.Kernel:complete`
+- `textDocument/hover` → `jupyter_core.Kernel:inspect`
+
+Auto-attached on `start_kernel`, detached on `stop_kernel` (gated by `config.virtual_lsp`, default `true`). One server instance is shared across buffers via `vim.lsp.start`'s name+root_dir deduplication.
 
 #### `format/` (Phase 2)
 
