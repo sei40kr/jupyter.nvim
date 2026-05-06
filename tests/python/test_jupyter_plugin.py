@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+
+from conftest import make_async_client_mock, make_async_manager_mock
 
 
 # ----------------------------------------------------------------------
@@ -35,13 +38,17 @@ def _install_kernel(
 ) -> tuple[MagicMock, MagicMock]:
     """Start a kernel through the plugin and return (manager, client) mocks."""
 
-    manager = MagicMock(name=f"KernelManager[{kernel_id}]")
-    client = MagicMock(name=f"KernelClient[{kernel_id}]")
+    manager = make_async_manager_mock(f"KernelManager[{kernel_id}]")
+    client = make_async_client_mock(f"KernelClient[{kernel_id}]")
     manager.client.return_value = client
     mock_kernel_manager_cls.return_value = manager
 
     plugin.start_kernel([kernel_id, spec_name])
     return manager, client
+
+
+def _run_on_plugin_loop(plugin: Any, coro: Any, *, timeout: float = 5.0) -> Any:
+    return asyncio.run_coroutine_threadsafe(coro, plugin._loop).result(timeout=timeout)
 
 
 # ----------------------------------------------------------------------
@@ -52,11 +59,13 @@ def _install_kernel(
 def test_start_adds_entry(plugin: Any, mock_kernel_manager_cls: MagicMock) -> None:
     manager, client = _install_kernel(plugin, mock_kernel_manager_cls)
 
-    assert plugin._kernels["k1"] == (manager, client)
+    kernel = plugin._kernels["k1"]
+    assert kernel.manager is manager
+    assert kernel.client is client
     mock_kernel_manager_cls.assert_called_once_with(kernel_name="python3")
-    manager.start_kernel.assert_called_once_with()
+    manager.start_kernel.assert_awaited_once_with()
     client.start_channels.assert_called_once_with()
-    client.wait_for_ready.assert_called_once()
+    client.wait_for_ready.assert_awaited_once()
 
 
 def test_start_rejects_duplicate_id(plugin: Any, mock_kernel_manager_cls: MagicMock) -> None:
@@ -72,7 +81,7 @@ def test_stop_removes_entry(plugin: Any, mock_kernel_manager_cls: MagicMock) -> 
 
     assert "k1" not in plugin._kernels
     client.stop_channels.assert_called_once_with()
-    manager.shutdown_kernel.assert_called_once_with(now=True)
+    manager.shutdown_kernel.assert_awaited_once_with(now=True)
 
 
 def test_stop_unknown_id_is_noop(plugin: Any) -> None:
@@ -85,9 +94,11 @@ def test_restart_preserves_id(plugin: Any, mock_kernel_manager_cls: MagicMock) -
 
     plugin.restart_kernel(["k1"])
 
-    assert plugin._kernels["k1"] == (manager, client)
-    manager.restart_kernel.assert_called_once_with(now=True)
-    client.wait_for_ready.assert_called_once()
+    kernel = plugin._kernels["k1"]
+    assert kernel.manager is manager
+    assert kernel.client is client
+    manager.restart_kernel.assert_awaited_once_with(now=True)
+    client.wait_for_ready.assert_awaited_once()
 
 
 def test_restart_unknown_id_raises(plugin: Any) -> None:
@@ -196,11 +207,13 @@ def test_execute_unknown_kernel_raises(plugin: Any) -> None:
 
 
 # ----------------------------------------------------------------------
-# Complete
+# Complete (async coroutine path)
 # ----------------------------------------------------------------------
 
 
 def test_complete_returns_expected_shape(plugin: Any, mock_kernel_manager_cls: MagicMock) -> None:
+    import jupyter_plugin
+
     _, client = _install_kernel(plugin, mock_kernel_manager_cls)
     client.complete.return_value = "comp-1"
     client.get_shell_msg.side_effect = [
@@ -225,7 +238,8 @@ def test_complete_returns_expected_shape(plugin: Any, mock_kernel_manager_cls: M
         },
     ]
 
-    result = plugin.complete(["k1", "foo", 3])
+    kernel = plugin._kernels["k1"]
+    result = _run_on_plugin_loop(plugin, jupyter_plugin._do_complete(kernel, "foo", 3))
 
     client.complete.assert_called_once_with("foo", 3)
     assert result["matches"] == ["foo", "foobar"]
@@ -235,11 +249,13 @@ def test_complete_returns_expected_shape(plugin: Any, mock_kernel_manager_cls: M
 
 
 # ----------------------------------------------------------------------
-# Inspect
+# Inspect (async coroutine path)
 # ----------------------------------------------------------------------
 
 
 def test_inspect_found_true(plugin: Any, mock_kernel_manager_cls: MagicMock) -> None:
+    import jupyter_plugin
+
     _, client = _install_kernel(plugin, mock_kernel_manager_cls)
     client.inspect.return_value = "ins-1"
     client.get_shell_msg.side_effect = [
@@ -256,13 +272,16 @@ def test_inspect_found_true(plugin: Any, mock_kernel_manager_cls: MagicMock) -> 
         },
     ]
 
-    result = plugin.inspect(["k1", "foo", 0])
+    kernel = plugin._kernels["k1"]
+    result = _run_on_plugin_loop(plugin, jupyter_plugin._do_inspect(kernel, "foo", 0))
 
     client.inspect.assert_called_once_with("foo", 0)
     assert result == {"found": True, "data": {"text/plain": "Signature: foo()"}}
 
 
 def test_inspect_found_false(plugin: Any, mock_kernel_manager_cls: MagicMock) -> None:
+    import jupyter_plugin
+
     _, client = _install_kernel(plugin, mock_kernel_manager_cls)
     client.inspect.return_value = "ins-2"
     client.get_shell_msg.side_effect = [
@@ -279,7 +298,8 @@ def test_inspect_found_false(plugin: Any, mock_kernel_manager_cls: MagicMock) ->
         },
     ]
 
-    result = plugin.inspect(["k1", "nope", 0])
+    kernel = plugin._kernels["k1"]
+    result = _run_on_plugin_loop(plugin, jupyter_plugin._do_inspect(kernel, "nope", 0))
 
     assert result == {"found": False, "data": {}}
 

@@ -4,131 +4,86 @@ This module hosts the ``Jupyter*`` RPC functions consumed by the
 ``jupyter_core`` Lua module. It owns no editor state — only a registry of
 running kernels, keyed by an opaque id supplied by the Lua side.
 
-Each kernel runs in its own dedicated worker thread. ZMQ sockets are
-thread-bound, so every channel operation must happen on the thread that
-opened the channels; cross-thread access raises ``Socket operation on
-non-socket``. Sync RPCs block on a future submitted to the worker; async
-RPCs return immediately and route the reply back to Lua via
-``nvim.async_call`` + ``nvim.exec_lua``.
+A single background daemon thread runs an asyncio event loop; every
+kernel is a coroutine context inside that loop. ZMQ sockets stay bound
+to that one thread so ``jupyter_client``'s threading invariants are
+preserved while every RPC is expressed as a straight coroutine. Sync
+RPCs bridge into the loop with
+``asyncio.run_coroutine_threadsafe(...).result(timeout=...)``; async RPCs
+route their reply back to Lua via ``nvim.async_call`` + ``nvim.exec_lua``.
 """
 
 from __future__ import annotations
 
-import queue
+import asyncio
 import threading
-from collections.abc import Callable
+from collections.abc import Coroutine
 from concurrent.futures import Future
-from typing import Any, cast
+from typing import Any, TypeVar
 
 import pynvim
-from jupyter_client.blocking.client import BlockingKernelClient
+from jupyter_client.asynchronous.client import AsyncKernelClient
 from jupyter_client.kernelspec import KernelSpecManager
-from jupyter_client.manager import KernelManager
+from jupyter_client.manager import AsyncKernelManager
 
 _SHELL_TIMEOUT_SECONDS: float = 30.0
 _IOPUB_TIMEOUT_SECONDS: float = 30.0
 _KERNEL_START_TIMEOUT_SECONDS: float = 60.0
 _RPC_TIMEOUT_SECONDS: float = 60.0
 
+_T = TypeVar("_T")
 
-class _KernelWorker:
-    """A kernel + its dedicated worker thread.
 
-    All channel operations (``client.complete``, ``client.execute``, …)
-    are submitted to this thread via :meth:`submit`. Sync callers block
-    on ``future.result()``; async callers attach ``done_callback``.
+class _Kernel:
+    """A live kernel paired with a per-kernel serialization lock.
+
+    ``client.get_iopub_msg`` / ``get_shell_msg`` read a single ZMQ socket
+    each, so concurrent requests on the same kernel would otherwise
+    interleave their channel reads. The lock reproduces the ordering
+    guarantee the previous worker-thread + queue design provided.
     """
 
-    def __init__(self, spec_name: str) -> None:
-        self._spec_name: str = spec_name
-        self._queue: queue.Queue[
-            tuple[Callable[[BlockingKernelClient], Any], Future[Any]] | None
-        ] = queue.Queue()
+    def __init__(self, manager: AsyncKernelManager, client: AsyncKernelClient) -> None:
+        self.manager: AsyncKernelManager = manager
+        self.client: AsyncKernelClient = client
+        self.lock: asyncio.Lock = asyncio.Lock()
+
+
+class _LoopRunner:
+    """Background daemon thread hosting the shared asyncio event loop."""
+
+    def __init__(self) -> None:
+        self.loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         self._ready: threading.Event = threading.Event()
-        self._start_error: BaseException | None = None
-        self._manager: KernelManager | None = None
-        self._client: BlockingKernelClient | None = None
         self._thread: threading.Thread = threading.Thread(
             target=self._run,
-            name=f"jupyter-kernel-{spec_name}",
+            name="jupyter-rplugin-loop",
             daemon=True,
         )
         self._thread.start()
-
-    def wait_ready(self, timeout: float) -> None:
-        if not self._ready.wait(timeout=timeout):
-            raise TimeoutError(f"timed out starting kernel {self._spec_name!r}")
-        if self._start_error is not None:
-            raise self._start_error
-
-    @property
-    def client(self) -> BlockingKernelClient:
-        if self._client is None:
-            raise RuntimeError("kernel client not initialized")
-        return self._client
-
-    @property
-    def manager(self) -> KernelManager:
-        if self._manager is None:
-            raise RuntimeError("kernel manager not initialized")
-        return self._manager
-
-    def submit(self, fn: Callable[[BlockingKernelClient], Any]) -> Future[Any]:
-        future: Future[Any] = Future()
-        self._queue.put((fn, future))
-        return future
-
-    def stop(self) -> None:
-        self._queue.put(None)
-        self._thread.join(timeout=_RPC_TIMEOUT_SECONDS)
+        self._ready.wait()
 
     def _run(self) -> None:
-        try:
-            manager = KernelManager(kernel_name=self._spec_name)
-            manager.start_kernel()
-            client = cast(BlockingKernelClient, manager.client())
-            client.start_channels()
-            client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
-        except BaseException as exc:  # pragma: no cover — propagated to wait_ready
-            self._start_error = exc
-            self._ready.set()
-            return
-
-        self._manager = manager
-        self._client = client
+        asyncio.set_event_loop(self.loop)
         self._ready.set()
-
-        while True:
-            item = self._queue.get()
-            if item is None:
-                self._shutdown(manager, client)
-                return
-            fn, future = item
-            if future.cancelled():
-                continue
-            try:
-                result = fn(client)
-            except BaseException as exc:
-                future.set_exception(exc)
-            else:
-                future.set_result(result)
-
-    @staticmethod
-    def _shutdown(manager: KernelManager, client: BlockingKernelClient) -> None:
-        try:
-            client.stop_channels()
-        finally:
-            manager.shutdown_kernel(now=True)
+        self.loop.run_forever()
 
 
 @pynvim.plugin
 class JupyterPlugin:
-    """Per-kernel worker threads behind sync + async RPC entry points."""
+    """Asyncio-backed bridge between Neovim RPC and ``jupyter_client``."""
 
     def __init__(self, nvim: pynvim.Nvim) -> None:
         self._nvim: pynvim.Nvim = nvim
-        self._kernels: dict[str, _KernelWorker] = {}
+        self._kernels: dict[str, _Kernel] = {}
         self._spec_manager: KernelSpecManager = KernelSpecManager()
+        self._loop_runner: _LoopRunner | None = None
+
+    @property
+    def _loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop_runner is None:
+            self._loop_runner = _LoopRunner()
+        return self._loop_runner.loop
 
     # ------------------------------------------------------------------
     # RPC functions
@@ -143,37 +98,29 @@ class JupyterPlugin:
         if kernel_id_s in self._kernels:
             raise ValueError(f"kernel already started: {kernel_id_s}")
 
-        worker = _KernelWorker(spec_name_s)
-        try:
-            worker.wait_ready(timeout=_KERNEL_START_TIMEOUT_SECONDS)
-        except BaseException:
-            worker.stop()
-            raise
-        self._kernels[kernel_id_s] = worker
+        kernel = self._run_sync(
+            _start_kernel(spec_name_s),
+            timeout=_KERNEL_START_TIMEOUT_SECONDS,
+        )
+        self._kernels[kernel_id_s] = kernel
 
     @pynvim.function("JupyterStopKernel", sync=True)
     def stop_kernel(self, args: list[Any]) -> None:
         (kernel_id,) = _expect_args(args, 1, ("kernel_id",))
         kernel_id_s = _as_str(kernel_id, "kernel_id")
 
-        worker = self._kernels.pop(kernel_id_s, None)
-        if worker is None:
+        kernel = self._kernels.pop(kernel_id_s, None)
+        if kernel is None:
             return
-        worker.stop()
+        self._run_sync(_stop_kernel(kernel), timeout=_RPC_TIMEOUT_SECONDS)
 
     @pynvim.function("JupyterRestartKernel", sync=True)
     def restart_kernel(self, args: list[Any]) -> None:
         (kernel_id,) = _expect_args(args, 1, ("kernel_id",))
         kernel_id_s = _as_str(kernel_id, "kernel_id")
 
-        worker = self._lookup(kernel_id_s)
-
-        def _do(client: BlockingKernelClient) -> None:
-            del client  # we use the manager directly
-            worker.manager.restart_kernel(now=True)
-            worker.client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
-
-        worker.submit(_do).result(timeout=_RPC_TIMEOUT_SECONDS)
+        kernel = self._lookup(kernel_id_s)
+        self._run_sync(_restart_kernel(kernel), timeout=_RPC_TIMEOUT_SECONDS)
 
     @pynvim.function("JupyterExecuteCode", sync=True)
     def execute_code(self, args: list[Any]) -> list[dict[str, Any]]:
@@ -181,16 +128,8 @@ class JupyterPlugin:
         kernel_id_s = _as_str(kernel_id, "kernel_id")
         code_s = _as_str(code, "code")
 
-        worker = self._lookup(kernel_id_s)
-
-        def _do(client: BlockingKernelClient) -> list[dict[str, Any]]:
-            msg_id = client.execute(code_s, store_history=False, allow_stdin=False)
-            return _drain_iopub_for(client, msg_id)
-
-        return cast(
-            list[dict[str, Any]],
-            worker.submit(_do).result(timeout=_RPC_TIMEOUT_SECONDS),
-        )
+        kernel = self._lookup(kernel_id_s)
+        return self._run_sync(_do_execute(kernel, code_s), timeout=_RPC_TIMEOUT_SECONDS)
 
     @pynvim.function("JupyterCompleteAsync", sync=False)
     def complete_async(self, args: list[Any]) -> None:
@@ -203,27 +142,14 @@ class JupyterPlugin:
         cursor_pos_i = _as_int(cursor_pos, "cursor_pos")
 
         try:
-            worker = self._lookup(kernel_id_s)
+            kernel = self._lookup(kernel_id_s)
         except Exception as exc:
             self._dispatch_resolve(req_id_i, str(exc), None)
             return
-
-        def _do(client: BlockingKernelClient) -> dict[str, Any]:
-            msg_id = client.complete(code_s, cursor_pos_i)
-            reply = _wait_for_shell_reply(client, msg_id, "complete_reply")
-            content = _content(reply)
-            result: dict[str, Any] = {
-                "matches": [str(m) for m in (content.get("matches") or [])],
-                "cursor_start": int(content.get("cursor_start", cursor_pos_i)),
-                "cursor_end": int(content.get("cursor_end", cursor_pos_i)),
-            }
-            metadata = content.get("metadata")
-            if isinstance(metadata, dict):
-                result["metadata"] = dict(metadata)
-            return result
-
-        future = worker.submit(_do)
-        future.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
+        cf = asyncio.run_coroutine_threadsafe(
+            _do_complete(kernel, code_s, cursor_pos_i), self._loop
+        )
+        cf.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
 
     @pynvim.function("JupyterInspectAsync", sync=False)
     def inspect_async(self, args: list[Any]) -> None:
@@ -236,23 +162,12 @@ class JupyterPlugin:
         cursor_pos_i = _as_int(cursor_pos, "cursor_pos")
 
         try:
-            worker = self._lookup(kernel_id_s)
+            kernel = self._lookup(kernel_id_s)
         except Exception as exc:
             self._dispatch_resolve(req_id_i, str(exc), None)
             return
-
-        def _do(client: BlockingKernelClient) -> dict[str, Any]:
-            msg_id = client.inspect(code_s, cursor_pos_i)
-            reply = _wait_for_shell_reply(client, msg_id, "inspect_reply")
-            content = _content(reply)
-            data = content.get("data")
-            return {
-                "found": bool(content.get("found", False)),
-                "data": dict(data) if isinstance(data, dict) else {},
-            }
-
-        future = worker.submit(_do)
-        future.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
+        cf = asyncio.run_coroutine_threadsafe(_do_inspect(kernel, code_s, cursor_pos_i), self._loop)
+        cf.add_done_callback(lambda f: self._on_async_done(req_id_i, f))
 
     @pynvim.function("JupyterListKernelspecs", sync=True)
     def list_kernelspecs(self, args: list[Any]) -> list[dict[str, Any]]:
@@ -276,11 +191,14 @@ class JupyterPlugin:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _lookup(self, kernel_id: str) -> _KernelWorker:
+    def _lookup(self, kernel_id: str) -> _Kernel:
         try:
             return self._kernels[kernel_id]
         except KeyError as exc:
             raise ValueError(f"unknown kernel id: {kernel_id}") from exc
+
+    def _run_sync(self, coro: Coroutine[Any, Any, _T], *, timeout: float) -> _T:
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=timeout)
 
     def _on_async_done(self, req_id: int, future: Future[Any]) -> None:
         try:
@@ -301,8 +219,75 @@ class JupyterPlugin:
         self._nvim.exec_lua("require('jupyter_core.async')._resolve(...)", req_id, err, result)
 
 
-def _drain_iopub_for(client: BlockingKernelClient, msg_id: str) -> list[dict[str, Any]]:
-    """Block until ``msg_id`` reaches ``idle`` on iopub and return outputs.
+# ----------------------------------------------------------------------
+# Coroutines
+# ----------------------------------------------------------------------
+
+
+async def _start_kernel(spec_name: str) -> _Kernel:
+    manager = AsyncKernelManager(kernel_name=spec_name)
+    await manager.start_kernel()
+    client = manager.client()
+    client.start_channels()
+    try:
+        await client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
+    except BaseException:
+        client.stop_channels()
+        await manager.shutdown_kernel(now=True)
+        raise
+    return _Kernel(manager, client)
+
+
+async def _stop_kernel(kernel: _Kernel) -> None:
+    async with kernel.lock:
+        try:
+            kernel.client.stop_channels()
+        finally:
+            await kernel.manager.shutdown_kernel(now=True)
+
+
+async def _restart_kernel(kernel: _Kernel) -> None:
+    async with kernel.lock:
+        await kernel.manager.restart_kernel(now=True)
+        await kernel.client.wait_for_ready(timeout=_SHELL_TIMEOUT_SECONDS)
+
+
+async def _do_execute(kernel: _Kernel, code: str) -> list[dict[str, Any]]:
+    async with kernel.lock:
+        msg_id = kernel.client.execute(code, store_history=False, allow_stdin=False)
+        return await _drain_iopub_for(kernel.client, msg_id)
+
+
+async def _do_complete(kernel: _Kernel, code: str, cursor_pos: int) -> dict[str, Any]:
+    async with kernel.lock:
+        msg_id = kernel.client.complete(code, cursor_pos)
+        reply = await _wait_for_shell_reply(kernel.client, msg_id, "complete_reply")
+    content = _content(reply)
+    result: dict[str, Any] = {
+        "matches": [str(m) for m in (content.get("matches") or [])],
+        "cursor_start": int(content.get("cursor_start", cursor_pos)),
+        "cursor_end": int(content.get("cursor_end", cursor_pos)),
+    }
+    metadata = content.get("metadata")
+    if isinstance(metadata, dict):
+        result["metadata"] = dict(metadata)
+    return result
+
+
+async def _do_inspect(kernel: _Kernel, code: str, cursor_pos: int) -> dict[str, Any]:
+    async with kernel.lock:
+        msg_id = kernel.client.inspect(code, cursor_pos)
+        reply = await _wait_for_shell_reply(kernel.client, msg_id, "inspect_reply")
+    content = _content(reply)
+    data = content.get("data")
+    return {
+        "found": bool(content.get("found", False)),
+        "data": dict(data) if isinstance(data, dict) else {},
+    }
+
+
+async def _drain_iopub_for(client: AsyncKernelClient, msg_id: str) -> list[dict[str, Any]]:
+    """Await iopub messages for ``msg_id`` until the kernel goes idle.
 
     Outputs are returned in arrival order. Messages whose ``parent_header``
     does not match ``msg_id`` are ignored, so concurrent kernel activity
@@ -312,8 +297,8 @@ def _drain_iopub_for(client: BlockingKernelClient, msg_id: str) -> list[dict[str
     outputs: list[dict[str, Any]] = []
     while True:
         try:
-            msg = client.get_iopub_msg(timeout=_IOPUB_TIMEOUT_SECONDS)
-        except queue.Empty as exc:
+            msg = await asyncio.wait_for(client.get_iopub_msg(), timeout=_IOPUB_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError as exc:
             raise TimeoutError(f"timed out waiting for iopub idle for {msg_id}") from exc
 
         if _parent_msg_id(msg) != msg_id:
@@ -334,22 +319,22 @@ def _drain_iopub_for(client: BlockingKernelClient, msg_id: str) -> list[dict[str
     return outputs
 
 
-def _wait_for_shell_reply(
-    client: BlockingKernelClient, msg_id: str, expected_type: str
+async def _wait_for_shell_reply(
+    client: AsyncKernelClient, msg_id: str, expected_type: str
 ) -> dict[str, Any]:
-    """Wait for a shell reply with parent ``msg_id`` and the given type."""
+    """Await a shell reply with parent ``msg_id`` and the given type."""
 
     while True:
         try:
-            msg = client.get_shell_msg(timeout=_SHELL_TIMEOUT_SECONDS)
-        except queue.Empty as exc:
+            msg = await asyncio.wait_for(client.get_shell_msg(), timeout=_SHELL_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError as exc:
             raise TimeoutError(f"timed out waiting for {expected_type} for {msg_id}") from exc
 
         if _parent_msg_id(msg) != msg_id:
             continue
         if _msg_type(msg) != expected_type:
             continue
-        return cast(dict[str, Any], msg)
+        return msg
 
 
 def _output_from_iopub(msg_type: str | None, content: dict[str, Any]) -> dict[str, Any] | None:
