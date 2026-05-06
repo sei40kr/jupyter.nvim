@@ -32,12 +32,18 @@ let
       };
       julia = {
         displayName = "Julia";
+        # Mirrors IJulia.installkernel's canonical argv. Avoid pointing
+        # at IJulia's kernel.jl directly: under julia.withPackages it
+        # lives in a content-addressed depot path (not under
+        # share/julia/site/v<ver>), and modern kernel.jl only defines
+        # run_kernel() without a top-level call. Also leave JULIA_PROJECT
+        # to the wrapper — its depot project is what carries IJulia.
         argv = [
           "${juliaKernelEnv}/bin/julia"
           "-i"
           "--color=yes"
-          "--project=@."
-          "${juliaKernelEnv}/share/julia/site/v${juliaKernelEnv.version}/IJulia/src/kernel.jl"
+          "-e"
+          "import IJulia; IJulia.run_kernel()"
           "{connection_file}"
         ];
         language = "julia";
@@ -61,7 +67,11 @@ let
     };
   };
 
-  treesitterParsers = pkgs.vimPlugins.nvim-treesitter.withPlugins (p: [ p.python ]);
+  treesitterParsers = pkgs.vimPlugins.nvim-treesitter.withPlugins (p: [
+    p.python
+    p.julia
+    p.r
+  ]);
 
   neovimWithPlugin = pkgs.wrapNeovimUnstable pkgs.neovim-unwrapped (
     pkgs.neovimUtils.makeNeovimConfig {
