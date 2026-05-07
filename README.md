@@ -101,9 +101,6 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 require("jupyter").setup({
   -- Skip the kernelspec picker by pinning a default.
   default_kernel = "python3",
-
-  -- Recommended starter keymaps (off by default).
-  create_default_keymaps = true,
 })
 ```
 
@@ -131,28 +128,64 @@ expands the JSON into percent format in the buffer; edit and execute
 cells normally, then `:w` to round-trip back to the file on disk. See
 [`.ipynb` round-trip](#ipynb-round-trip).
 
-There are **no default keymaps** unless `create_default_keymaps = true` is
-passed to `setup`. When enabled, the plugin installs the following
-buffer-local maps in supported buffers (`python`, `julia`, `r`):
+### Keymaps
 
-| Mapping            | Lua API                                | Description           |
-| ------------------ | -------------------------------------- | --------------------- |
-| `<localleader>jx`  | `require("jupyter").execute_cell()`    | Execute current cell  |
-| `<localleader>jX`  | `require("jupyter").execute_all()`     | Execute every cell    |
-| `<localleader>jc`  | `require("jupyter").clear_cell()`      | Clear cell output     |
-| `<localleader>jn`  | `require("jupyter").next_cell()`       | Next cell             |
-| `<localleader>jp`  | `require("jupyter").prev_cell()`       | Previous cell         |
-| `<localleader>jo`  | `require("jupyter").insert_cell_below()` | Insert cell below   |
-| `<localleader>jO`  | `require("jupyter").insert_cell_above()` | Insert cell above   |
-| `K`                | `require("jupyter").hover()`           | Kernel-backed hover   |
-
-Or roll your own:
+There are **no default keymaps**. Bind the bits you want via
+`vim.keymap.set` — typically buffer-local, scoped to the supported
+filetypes:
 
 ```lua
-local jupyter = require("jupyter")
-vim.keymap.set("n", "<leader>x", jupyter.execute_cell, { desc = "Execute cell" })
-vim.keymap.set("n", "]j",        jupyter.next_cell,    { desc = "Next cell" })
-vim.keymap.set("n", "[j",        jupyter.prev_cell,    { desc = "Prev cell" })
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "python", "julia", "r" },
+  callback = function(ev)
+    local jupyter = require("jupyter")
+    local function map(lhs, rhs, desc)
+      vim.keymap.set("n", lhs, rhs, { buffer = ev.buf, silent = true, desc = desc })
+    end
+
+    -- Cell navigation (bracket-motion family: ]d, ]g, ]q, ]j…)
+    map("]j", jupyter.next_cell, "Next Cell")
+    map("[j", jupyter.prev_cell, "Previous Cell")
+
+    -- Filetype-local verbs under <localleader>j
+    map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
+    map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
+    map("<localleader>jo", jupyter.insert_cell_below,  "Insert Cell Below")
+    map("<localleader>jO", jupyter.insert_cell_above,  "Insert Cell Above")
+    map("<localleader>jd", jupyter.delete_cell,        "Delete Cell")
+    map("<localleader>jm", jupyter.merge_with_prev,    "Merge with Previous")
+    map("<localleader>js", jupyter.split_at_cursor,    "Split Cell at Cursor")
+    map("<localleader>jc", jupyter.clear_cell,         "Clear Cell Output")
+    map("<localleader>jC", jupyter.clear_all_outputs,  "Clear All Outputs")
+    map("<localleader>jr", jupyter.restart_kernel,     "Restart Kernel")
+    map("<localleader>jk", function() jupyter.start_kernel() end, "Start Kernel")
+    map("<localleader>jq", jupyter.stop_kernel,        "Stop Kernel")
+    map("<localleader>ji", jupyter.hover,              "Inspect Symbol")
+  end,
+})
+```
+
+`K` is intentionally not bound — when a kernel is attached the
+in-process LSP serves `textDocument/hover`, so the editor's normal
+LSP `K` mapping already produces kernel-backed inspection.
+
+If you use [lazy.nvim](https://github.com/folke/lazy.nvim), the same
+binding set fits naturally into a plugin spec via `keys` and `ft`:
+
+```lua
+{
+  "sei40kr/jupyter.nvim",
+  build = ":UpdateRemotePlugins",
+  ft = { "python", "julia", "r" },
+  opts = {},
+  keys = {
+    { "]j", function() require("jupyter").next_cell() end, ft = { "python", "julia", "r" }, desc = "Next Cell" },
+    { "[j", function() require("jupyter").prev_cell() end, ft = { "python", "julia", "r" }, desc = "Previous Cell" },
+    { "<localleader>jj", function() require("jupyter").execute_cell() end, ft = { "python", "julia", "r" }, desc = "Execute Cell" },
+    { "<localleader>ja", function() require("jupyter").execute_all() end,  ft = { "python", "julia", "r" }, desc = "Execute All Cells" },
+    -- …add the rest as needed
+  },
+}
 ```
 
 ## Lua API
@@ -205,10 +238,6 @@ require("jupyter").setup({
       error    = "DiagnosticError",
     },
   },
-
-  -- Install buffer-local <localleader>j* keymaps in supported buffers
-  -- (python, julia, r).
-  create_default_keymaps = false,
 
   -- Auto-attach the in-process LSP (completion + hover) when a kernel starts.
   virtual_lsp = true,

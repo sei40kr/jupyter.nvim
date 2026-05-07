@@ -1,8 +1,6 @@
 ---Public entry point for the editor module.
 ---
----``setup`` wires user options and (optionally) installs a small set of
----buffer-local keymaps in supported filetype buffers (see
----``cell.supported_filetypes``). Every command-shaped function lives on
+---``setup`` wires user options. Every command-shaped function lives on
 ---this module so users can map them directly without poking at internal
 ---submodules.
 
@@ -272,103 +270,12 @@ function M.hover()
 	hover_mod.hover(current_buf())
 end
 
----@type {lhs: string, rhs: fun(), mode: string|string[], desc: string}[]
-local DEFAULT_KEYMAPS = {
-	{
-		lhs = "<localleader>jx",
-		rhs = function()
-			M.execute_cell()
-		end,
-		mode = "n",
-		desc = "Jupyter: execute cell",
-	},
-	{
-		lhs = "<localleader>jX",
-		rhs = function()
-			M.execute_all()
-		end,
-		mode = "n",
-		desc = "Jupyter: execute all cells",
-	},
-	{
-		lhs = "<localleader>jc",
-		rhs = function()
-			M.clear_cell()
-		end,
-		mode = "n",
-		desc = "Jupyter: clear cell output",
-	},
-	{
-		lhs = "<localleader>jn",
-		rhs = function()
-			M.next_cell()
-		end,
-		mode = "n",
-		desc = "Jupyter: next cell",
-	},
-	{
-		lhs = "<localleader>jp",
-		rhs = function()
-			M.prev_cell()
-		end,
-		mode = "n",
-		desc = "Jupyter: previous cell",
-	},
-	{
-		lhs = "<localleader>jo",
-		rhs = function()
-			M.insert_cell_below()
-		end,
-		mode = "n",
-		desc = "Jupyter: insert cell below",
-	},
-	{
-		lhs = "<localleader>jO",
-		rhs = function()
-			M.insert_cell_above()
-		end,
-		mode = "n",
-		desc = "Jupyter: insert cell above",
-	},
-	{
-		lhs = "K",
-		rhs = function()
-			M.hover()
-		end,
-		mode = "n",
-		desc = "Jupyter: hover",
-	},
-}
-
-local DEFAULT_KEYMAPS_AUGROUP = "jupyter.default_keymaps"
-
-local function install_default_keymaps()
-	local group = vim.api.nvim_create_augroup(DEFAULT_KEYMAPS_AUGROUP, { clear = true })
-	vim.api.nvim_create_autocmd("FileType", {
-		group = group,
-		pattern = cell.supported_filetypes(),
-		callback = function(ev)
-			for _, m in ipairs(DEFAULT_KEYMAPS) do
-				vim.keymap.set(m.mode, m.lhs, m.rhs, {
-					buffer = ev.buf,
-					silent = true,
-					desc = m.desc,
-				})
-			end
-		end,
-	})
-end
-
 ---Initialize the plugin. Safe to call multiple times — the most recent
----options win and the default-keymap autocmd group is cleared between
----calls.
+---options win.
 ---@param opts jupyter.Config?
 function M.setup(opts)
 	M._cfg = config.merge(opts)
 	display.setup(M._cfg.display)
-	if M._cfg.create_default_keymaps then
-		install_default_keymaps()
-	end
 end
 
 return M

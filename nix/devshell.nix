@@ -81,14 +81,58 @@ let
         { plugin = jupyterNvimPlugin; }
         { plugin = treesitterParsers; }
         { plugin = pkgs.vimPlugins.blink-cmp; }
+        { plugin = pkgs.vimPlugins.which-key-nvim; }
       ];
       customRC = ''
         lua << EOF
+          -- mapleader / maplocalleader must be set before any keymap
+          -- that interpolates them is registered. The FileType autocmd
+          -- below fires later, so setting them here is in time.
+          vim.g.mapleader = " "
+          vim.g.maplocalleader = ","
+
           -- jupyter.nvim's virtual LSP exposes completion + hover, so blink
           -- only needs its default LSP source — no plugin-specific provider.
           require("blink.cmp").setup({
             sources = { default = { "lsp", "buffer" } },
             keymap = { preset = "default" },
+          })
+
+          require("which-key").setup({})
+
+          vim.api.nvim_create_autocmd("FileType", {
+            pattern = { "python", "julia", "r" },
+            callback = function(ev)
+              local jupyter = require("jupyter")
+              local function map(lhs, rhs, desc)
+                vim.keymap.set("n", lhs, rhs, {
+                  buffer = ev.buf,
+                  silent = true,
+                  desc = desc,
+                })
+              end
+
+              require("which-key").add({
+                { "<localleader>j", group = "jupyter", buffer = ev.buf },
+              })
+
+              map("]j", jupyter.next_cell, "Next Cell")
+              map("[j", jupyter.prev_cell, "Previous Cell")
+
+              map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
+              map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
+              map("<localleader>jo", jupyter.insert_cell_below,  "Insert Cell Below")
+              map("<localleader>jO", jupyter.insert_cell_above,  "Insert Cell Above")
+              map("<localleader>jd", jupyter.delete_cell,        "Delete Cell")
+              map("<localleader>jm", jupyter.merge_with_prev,    "Merge with Previous")
+              map("<localleader>js", jupyter.split_at_cursor,    "Split Cell at Cursor")
+              map("<localleader>jc", jupyter.clear_cell,         "Clear Cell Output")
+              map("<localleader>jC", jupyter.clear_all_outputs,  "Clear All Outputs")
+              map("<localleader>jr", jupyter.restart_kernel,     "Restart Kernel")
+              map("<localleader>jk", function() jupyter.start_kernel() end, "Start Kernel")
+              map("<localleader>jq", jupyter.stop_kernel,        "Stop Kernel")
+              map("<localleader>ji", jupyter.hover,              "Inspect Symbol")
+            end,
           })
         EOF
       '';

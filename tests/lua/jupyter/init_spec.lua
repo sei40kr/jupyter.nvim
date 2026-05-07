@@ -161,7 +161,6 @@ describe("jupyter.init", function()
 	end)
 
 	after_each(function()
-		pcall(vim.api.nvim_del_augroup_by_name, "jupyter.default_keymaps")
 		if registry ~= nil then
 			for _, b in ipairs(registry.bufnrs()) do
 				registry.clear(b)
@@ -178,7 +177,7 @@ describe("jupyter.init", function()
 				jupyter.setup({ default_kernel = "python3" })
 			end)
 			assert.equals("python3", jupyter._cfg.default_kernel)
-			assert.equals(false, jupyter._cfg.create_default_keymaps)
+			assert.equals(true, jupyter._cfg.virtual_lsp)
 		end)
 
 		it("warns on unknown keys but still applies known ones", function()

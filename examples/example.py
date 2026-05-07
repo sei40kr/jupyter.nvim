@@ -4,7 +4,7 @@
 # Open this file inside the devshell with `nvim examples/example.py`,
 # then `:lua require('jupyter').start_kernel('python3')` and step through
 # the cells with `:lua require('jupyter').execute_cell()` (or
-# `<localleader>jx` if default keymaps are enabled).
+# `<localleader>jj` — the devshell wires up jupyter.nvim keymaps).
 
 # %%
 print("hello from the kernel")
