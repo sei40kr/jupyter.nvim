@@ -242,9 +242,6 @@ require("jupyter").setup({
       error    = "DiagnosticError",
     },
   },
-
-  -- Auto-attach the in-process LSP (completion + hover) when a kernel starts.
-  virtual_lsp = true,
 })
 ```
 

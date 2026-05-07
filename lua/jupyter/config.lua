@@ -9,20 +9,17 @@ local M = {}
 ---@class jupyter.Config
 ---@field default_kernel string?            spec_name to use if start_kernel called w/o arg
 ---@field display jupyter.display.Config?
----@field virtual_lsp boolean               auto-attach the in-process LSP when a kernel starts (default true)
 
 ---@type jupyter.Config
 M.defaults = {
 	default_kernel = nil,
 	display = nil,
-	virtual_lsp = true,
 }
 
 ---@type table<string, type|type[]>
 local TYPE_CHECKS = {
 	default_kernel = "string",
 	display = "table",
-	virtual_lsp = "boolean",
 }
 
 ---@param key string

@@ -299,7 +299,7 @@ In-process LSP server. Registered with `vim.lsp.start` using a Lua `cmd` functio
 - `textDocument/completion` → `jupyter_core.Kernel:complete`
 - `textDocument/hover` → `jupyter_core.Kernel:inspect`
 
-Auto-attached on `start_kernel`, detached on `stop_kernel` (gated by `config.virtual_lsp`, default `true`). One server instance is shared across buffers via `vim.lsp.start`'s name+root_dir deduplication.
+Auto-attached on `start_kernel`, detached on `stop_kernel`. One server instance is shared across buffers via `vim.lsp.start`'s name+root_dir deduplication.
 
 #### `format/` (Phase 2)
 

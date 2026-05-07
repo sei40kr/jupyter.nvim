@@ -111,9 +111,7 @@ local function start_with_spec(spec_name, bufnr)
 	local Kernel = require("jupyter_core").Kernel
 	local kernel = Kernel.start(spec_name)
 	registry.set(bufnr, kernel)
-	if cfg().virtual_lsp then
-		lsp.attach(bufnr)
-	end
+	lsp.attach(bufnr)
 end
 
 ---Prompt the user to pick a kernelspec when neither an argument nor a
