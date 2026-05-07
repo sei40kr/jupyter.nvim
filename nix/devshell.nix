@@ -119,6 +119,8 @@ let
               map("]j", jupyter.next_cell, "Next Cell")
               map("[j", jupyter.prev_cell, "Previous Cell")
 
+              map("<M-CR>", jupyter.execute_and_advance, "Execute Cell and Advance")
+
               map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
               map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
               map("<localleader>jo", jupyter.insert_cell_below,  "Insert Cell Below")

@@ -147,6 +147,9 @@ vim.api.nvim_create_autocmd("FileType", {
     map("]j", jupyter.next_cell, "Next Cell")
     map("[j", jupyter.prev_cell, "Previous Cell")
 
+    -- Notebook-style "run cell, advance" on Alt+Enter.
+    map("<M-CR>", jupyter.execute_and_advance, "Execute Cell and Advance")
+
     -- Filetype-local verbs under <localleader>j
     map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
     map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
@@ -198,6 +201,7 @@ binding set fits naturally into a plugin spec via `keys` and `ft`:
 | `stop_kernel()`                             | Stop the buffer's kernel                           |
 | `restart_kernel()`                          | Restart the buffer's kernel                        |
 | `execute_cell()`                            | Execute the cell at the cursor                     |
+| `execute_and_advance()`                     | Execute, then move to the next cell (or create one) |
 | `execute_all()`                             | Execute every cell in the buffer in order          |
 | `clear_cell()`                              | Clear the output of the cell at the cursor         |
 | `clear_all_outputs()`                       | Clear every cell output in the buffer              |

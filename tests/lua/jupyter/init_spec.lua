@@ -285,6 +285,84 @@ describe("jupyter.init", function()
 		end)
 	end)
 
+	describe("execute_and_advance", function()
+		it("executes the cell at the cursor then moves to the next cell", function()
+			local bufnr = helpers.scratch_buf({
+				"# %%", -- 0
+				"x = 1", -- 1
+				"# %%", -- 2
+				"y = 2", -- 3
+			})
+			vim.api.nvim_set_current_buf(bufnr)
+			local winid = vim.api.nvim_get_current_win()
+			vim.api.nvim_win_set_cursor(winid, { 2, 0 }) -- row 1 (inside first cell)
+
+			with_notify(function()
+				jupyter.setup({})
+				jupyter.execute_and_advance()
+			end)
+
+			assert.equals(1, #stubs.execute_calls)
+			assert.equals("execute_cell", stubs.execute_calls[1].fn)
+			assert.equals(bufnr, stubs.execute_calls[1].bufnr)
+			assert.equals(1, stubs.execute_calls[1].row)
+
+			-- Cursor advanced into the body of the second cell.
+			assert.equals(4, vim.api.nvim_win_get_cursor(winid)[1])
+			-- Buffer untouched: no new cell was created.
+			assert.equals(4, vim.api.nvim_buf_line_count(bufnr))
+		end)
+
+		it("creates a new cell below and moves the cursor when there is no next cell", function()
+			local bufnr = helpers.scratch_buf({
+				"# %%", -- 0
+				"x = 1", -- 1
+			})
+			vim.api.nvim_set_current_buf(bufnr)
+			local winid = vim.api.nvim_get_current_win()
+			vim.api.nvim_win_set_cursor(winid, { 2, 0 }) -- row 1
+
+			with_notify(function()
+				jupyter.setup({})
+				jupyter.execute_and_advance()
+			end)
+
+			assert.equals(1, #stubs.execute_calls)
+			assert.equals(1, stubs.execute_calls[1].row)
+
+			assert.same({
+				"# %%",
+				"x = 1",
+				"",
+				"# %%",
+				"",
+			}, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+			-- Cursor sits on the new cell's empty content line (row 4 → 1-indexed 5).
+			assert.equals(5, vim.api.nvim_win_get_cursor(winid)[1])
+		end)
+
+		it("warns and skips execution when the cursor is in the preamble", function()
+			local bufnr = helpers.scratch_buf({
+				"preamble", -- 0
+				"# %%", -- 1
+				"x = 1", -- 2
+			})
+			vim.api.nvim_set_current_buf(bufnr)
+			local winid = vim.api.nvim_get_current_win()
+			vim.api.nvim_win_set_cursor(winid, { 1, 0 }) -- row 0 (preamble)
+
+			with_notify(function(notifications)
+				jupyter.setup({})
+				jupyter.execute_and_advance()
+				assert.equals(1, #notifications)
+				assert.equals(vim.log.levels.WARN, notifications[1].level)
+			end)
+
+			assert.equals(0, #stubs.execute_calls)
+			assert.equals(3, vim.api.nvim_buf_line_count(bufnr))
+		end)
+	end)
+
 	describe("hover", function()
 		it("delegates to hover.hover with the current buffer", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1" })

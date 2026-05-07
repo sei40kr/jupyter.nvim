@@ -248,6 +248,25 @@ function M.insert_cell_above(cell_type)
 	insert_cell("above", cell_type)
 end
 
+---Execute the cell at the cursor, then move to the next cell. When no
+---next cell exists, append a new empty code cell after the current one
+---and place the cursor inside it.
+function M.execute_and_advance()
+	local bufnr = current_buf()
+	local winid = win_for_buf(bufnr)
+	local row = cursor_row(winid)
+	if cell.get_cell_at(bufnr, row) == nil then
+		vim.notify(("jupyter: no cell at row %d"):format(row), vim.log.levels.WARN)
+		return
+	end
+	execute.execute_cell(bufnr, row)
+	if cell.next_cell(bufnr, winid) then
+		return
+	end
+	local target = cell.insert_cell(bufnr, row, "below", "code")
+	vim.api.nvim_win_set_cursor(winid, { target + 1, 0 })
+end
+
 function M.delete_cell()
 	local bufnr = current_buf()
 	local winid = win_for_buf(bufnr)
