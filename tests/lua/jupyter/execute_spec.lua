@@ -84,13 +84,16 @@ end
 
 describe("jupyter.execute", function()
 	local execute
+	local registry
 	local display_saved
 
 	before_each(function()
 		package.loaded["jupyter.execute"] = nil
 		package.loaded["jupyter.display"] = nil
 		package.loaded["jupyter.cell"] = nil
+		package.loaded["jupyter.registry"] = nil
 		execute = require("jupyter.execute")
+		registry = require("jupyter.registry")
 		display_saved = nil
 	end)
 
@@ -99,12 +102,15 @@ describe("jupyter.execute", function()
 			restore_display(display_saved)
 			display_saved = nil
 		end
+		for _, b in ipairs(registry.bufnrs()) do
+			registry.clear(b)
+		end
 	end)
 
 	describe("execute_cell", function()
 		it("notifies WARN and renders nothing when no kernel is set", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1" })
-			vim.b[bufnr].jupyter_kernel = nil
+			registry.clear(bufnr)
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -122,7 +128,7 @@ describe("jupyter.execute", function()
 
 		it("notifies ERROR when the kernel is dead", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1" })
-			vim.b[bufnr].jupyter_kernel = make_kernel("dead")
+			registry.set(bufnr, make_kernel("dead"))
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -140,7 +146,7 @@ describe("jupyter.execute", function()
 		it("happy path orders set_status busy → execute → show_output → set_status idle", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1", "y = 2" })
 			local kernel = make_kernel("idle", { { make_output("stream", { "ok" }) } })
-			vim.b[bufnr].jupyter_kernel = kernel
+			registry.set(bufnr, kernel)
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -165,7 +171,7 @@ describe("jupyter.execute", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1" })
 			local err_output = make_output("error", { "Traceback", "ValueError: boom" })
 			local kernel = make_kernel("idle", { { err_output } })
-			vim.b[bufnr].jupyter_kernel = kernel
+			registry.set(bufnr, kernel)
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -193,7 +199,7 @@ describe("jupyter.execute", function()
 				{ make_output("stream", { "first" }) },
 				{ make_output("stream", { "second" }) },
 			})
-			vim.b[bufnr].jupyter_kernel = kernel
+			registry.set(bufnr, kernel)
 
 			local winid = vim.api.nvim_get_current_win()
 			vim.api.nvim_win_set_buf(winid, bufnr)
@@ -221,7 +227,7 @@ describe("jupyter.execute", function()
 				{ make_output("stream", { "ok1" }) },
 				{ make_output("stream", { "ok2" }) },
 			})
-			vim.b[bufnr].jupyter_kernel = kernel
+			registry.set(bufnr, kernel)
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -254,7 +260,7 @@ describe("jupyter.execute", function()
 				{ make_output("error", { "boom" }) },
 				{ make_output("stream", { "unreached" }) },
 			})
-			vim.b[bufnr].jupyter_kernel = kernel
+			registry.set(bufnr, kernel)
 
 			local events = {}
 			display_saved = install_display_stubs(events)
@@ -284,7 +290,7 @@ describe("jupyter.execute", function()
 
 		it("notifies WARN and runs nothing when no kernel is set", function()
 			local bufnr = helpers.scratch_buf({ "# %%", "x = 1" })
-			vim.b[bufnr].jupyter_kernel = nil
+			registry.clear(bufnr)
 
 			local events = {}
 			display_saved = install_display_stubs(events)

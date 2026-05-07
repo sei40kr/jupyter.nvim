@@ -1,14 +1,17 @@
----@diagnostic disable: undefined-field, unused-local
+---@diagnostic disable: undefined-field, unused-local, missing-fields
 -- Make queries/ discoverable so jupyter.cell can find its Treesitter query.
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
 
 package.loaded["jupyter.hover"] = nil
+package.loaded["jupyter.registry"] = nil
 local hover = require("jupyter.hover")
+local registry = require("jupyter.registry")
 
 ---@param lines string[]
 ---@return integer
 local function make_buf(lines)
 	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.bo[bufnr].filetype = "python"
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 	return bufnr
 end
@@ -16,12 +19,20 @@ end
 ---@param bufnr integer
 ---@param inspect fun(self: table, code: string, pos: integer): jupyter_core.InspectResult
 local function set_kernel(bufnr, inspect)
-	vim.b[bufnr].jupyter_kernel = { inspect = inspect }
+	registry.set(bufnr, {
+		inspect_async = function(self, code, pos, callback)
+			local ok, result = pcall(inspect, self, code, pos)
+			if not ok then
+				error(result, 0)
+			end
+			callback(nil, result)
+		end,
+	})
 end
 
 ---@param bufnr integer
 local function clear_kernel(bufnr)
-	vim.b[bufnr].jupyter_kernel = nil
+	registry.clear(bufnr)
 end
 
 ---Replace ``vim.notify`` and ``vim.lsp.util.open_floating_preview`` with
@@ -60,6 +71,12 @@ local function place_cursor(bufnr, row, col)
 end
 
 describe("jupyter.hover", function()
+	after_each(function()
+		for _, b in ipairs(registry.bufnrs()) do
+			registry.clear(b)
+		end
+	end)
+
 	describe("hover", function()
 		it("warns and bails when no kernel is attached", function()
 			local buf = make_buf({ "# %%", "x = 1" })

@@ -12,6 +12,7 @@ local JUPYTER_MODULES = {
 	"jupyter.display",
 	"jupyter.hover",
 	"jupyter.lsp",
+	"jupyter.registry",
 	"jupyter_core",
 	"jupyter_core.kernel",
 	"jupyter_core.kernel_spec",
@@ -169,16 +170,23 @@ end
 describe("jupyter.init", function()
 	local stubs
 	local jupyter
+	local registry
 
 	before_each(function()
 		delete_jupyter_user_commands()
 		stubs = make_stubs()
 		jupyter = reload_with_stubs(stubs)
+		registry = require("jupyter.registry")
 	end)
 
 	after_each(function()
 		delete_jupyter_user_commands()
 		pcall(vim.api.nvim_del_augroup_by_name, "jupyter.default_keymaps")
+		if registry ~= nil then
+			for _, b in ipairs(registry.bufnrs()) do
+				registry.clear(b)
+			end
+		end
 		for _, name in ipairs(JUPYTER_MODULES) do
 			package.loaded[name] = nil
 		end
@@ -267,7 +275,7 @@ describe("jupyter.init", function()
 			end)
 			assert.equals(1, #stubs.kernel_state.start_calls)
 			assert.equals("python3", stubs.kernel_state.start_calls[1].spec_name)
-			local stored = vim.b[bufnr].jupyter_kernel
+			local stored = registry.get(bufnr)
 			assert.is_truthy(stored)
 			assert.equals("python3", stored.spec_name)
 		end)
@@ -294,7 +302,7 @@ describe("jupyter.init", function()
 				jupyter.stop_kernel()
 			end)
 			assert.equals(1, stubs.kernel_state.stop_calls)
-			assert.is_nil(vim.b[bufnr].jupyter_kernel)
+			assert.is_nil(registry.get(bufnr))
 
 			local found
 			for _, c in ipairs(stubs.display_calls) do
