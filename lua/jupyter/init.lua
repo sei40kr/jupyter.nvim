@@ -46,6 +46,15 @@ local function get_kernel(bufnr)
 	return registry.get(bufnr)
 end
 
+---Fire a ``User`` autocommand. ``data`` is exposed to callbacks as
+---``ev.data`` and always carries the buffer the lifecycle change is for,
+---plus ``kernel_id`` once a kernel is in scope.
+---@param pattern string
+---@param data table
+local function fire_user(pattern, data)
+	vim.api.nvim_exec_autocmds("User", { pattern = pattern, modeline = false, data = data })
+end
+
 ---Per-filetype kernel selection. Each entry's `match` runs against the
 ---list returned by ``KernelSpec.list()`` and the first hit wins.
 ---@type table<string, fun(spec: jupyter_core.KernelSpec): boolean>[]
@@ -108,10 +117,13 @@ local function start_with_spec(spec_name, bufnr)
 		vim.notify("jupyter: a kernel is already attached to this buffer", vim.log.levels.WARN)
 		return
 	end
+	fire_user("JupyterInitPre", { bufnr = bufnr })
 	local Kernel = require("jupyter_core").Kernel
 	local kernel = Kernel.start(spec_name)
 	registry.set(bufnr, kernel)
 	lsp.attach(bufnr)
+	fire_user("JupyterInitPost", { bufnr = bufnr, kernel_id = kernel.id })
+	fire_user("JupyterKernelReady", { bufnr = bufnr, kernel_id = kernel.id })
 end
 
 ---Prompt the user to pick a kernelspec when neither an argument nor a
@@ -170,10 +182,12 @@ function M.stop_kernel()
 		vim.notify("jupyter: no kernel attached to this buffer", vim.log.levels.WARN)
 		return
 	end
+	fire_user("JupyterDeinitPre", { bufnr = bufnr, kernel_id = kernel.id })
 	kernel:stop()
 	registry.clear(bufnr)
 	display.clear_all(bufnr)
 	lsp.detach(bufnr)
+	fire_user("JupyterDeinitPost", { bufnr = bufnr })
 end
 
 function M.restart_kernel()
@@ -185,6 +199,7 @@ function M.restart_kernel()
 	end
 	kernel:restart()
 	display.clear_all(bufnr)
+	fire_user("JupyterKernelReady", { bufnr = bufnr, kernel_id = kernel.id })
 end
 
 function M.execute_cell()

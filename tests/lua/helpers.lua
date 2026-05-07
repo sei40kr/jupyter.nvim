@@ -41,4 +41,28 @@ function M.with_vim_fn(overrides, fn)
 	end
 end
 
+---@class tests.CapturedAutocmd
+---@field pattern string
+---@field data any
+
+---Capture every ``User`` autocmd matching one of ``patterns`` into the
+---returned list (each entry is ``{pattern, data}`` in arrival order).
+---The autogroup created here is returned alongside so callers can clean
+---up with ``vim.api.nvim_del_augroup_by_id`` (typically inside
+---``finally``).
+---@param patterns string[]
+---@return tests.CapturedAutocmd[] events, integer group_id
+function M.capture_user_autocmds(patterns)
+	local events = {}
+	local group = vim.api.nvim_create_augroup("jupyter-test-capture", { clear = true })
+	vim.api.nvim_create_autocmd("User", {
+		group = group,
+		pattern = patterns,
+		callback = function(ev)
+			events[#events + 1] = { pattern = ev.match, data = ev.data }
+		end,
+	})
+	return events, group
+end
+
 return M

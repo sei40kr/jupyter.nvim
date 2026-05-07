@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
   "runtime.version": "LuaJIT",
-  "diagnostics.globals": ["vim", "describe", "it", "before_each", "after_each", "setup", "teardown", "pending"],
+  "diagnostics.globals": ["vim", "describe", "it", "before_each", "after_each", "setup", "teardown", "pending", "finally"],
   "workspace.library": ["${3rd}/luv/library"],
   "workspace.checkThirdParty": false,
   "workspace.ignoreDir": [".direnv", "result", "result-*"],

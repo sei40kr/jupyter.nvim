@@ -99,6 +99,15 @@ let
 
           require("which-key").setup({})
 
+          local KERNEL_BOUND_KEYS = {
+            "<M-CR>",
+            "<localleader>jj", "<localleader>ja",
+            "<localleader>jc", "<localleader>jC",
+            "<localleader>jr", "<localleader>jq",
+            "<localleader>ji",
+          }
+
+          -- Editing verbs: always available on supported filetypes.
           vim.api.nvim_create_autocmd("FileType", {
             pattern = { "python", "julia", "r" },
             callback = function(ev)
@@ -118,21 +127,46 @@ let
               map("]j", jupyter.next_cell, "Next Cell")
               map("[j", jupyter.prev_cell, "Previous Cell")
 
-              map("<M-CR>", jupyter.execute_and_advance, "Execute Cell and Advance")
+              map("<localleader>jo", jupyter.insert_cell_below, "Insert Cell Below")
+              map("<localleader>jO", jupyter.insert_cell_above, "Insert Cell Above")
+              map("<localleader>jd", jupyter.delete_cell,       "Delete Cell")
+              map("<localleader>jm", jupyter.merge_with_prev,   "Merge with Previous")
+              map("<localleader>js", jupyter.split_at_cursor,   "Split Cell at Cursor")
 
-              map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
-              map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
-              map("<localleader>jo", jupyter.insert_cell_below,  "Insert Cell Below")
-              map("<localleader>jO", jupyter.insert_cell_above,  "Insert Cell Above")
-              map("<localleader>jd", jupyter.delete_cell,        "Delete Cell")
-              map("<localleader>jm", jupyter.merge_with_prev,    "Merge with Previous")
-              map("<localleader>js", jupyter.split_at_cursor,    "Split Cell at Cursor")
-              map("<localleader>jc", jupyter.clear_cell,         "Clear Cell Output")
-              map("<localleader>jC", jupyter.clear_all_outputs,  "Clear All Outputs")
-              map("<localleader>jr", jupyter.restart_kernel,     "Restart Kernel")
               map("<localleader>jk", function() jupyter.start_kernel() end, "Start Kernel")
-              map("<localleader>jq", jupyter.stop_kernel,        "Stop Kernel")
-              map("<localleader>ji", jupyter.hover,              "Inspect Symbol")
+            end,
+          })
+
+          -- Kernel-bound verbs: live only between JupyterKernelReady and JupyterDeinitPre.
+          vim.api.nvim_create_autocmd("User", {
+            pattern = "JupyterKernelReady",
+            callback = function(ev)
+              local jupyter = require("jupyter")
+              local function map(lhs, rhs, desc)
+                vim.keymap.set("n", lhs, rhs, {
+                  buffer = ev.data.bufnr,
+                  silent = true,
+                  desc = desc,
+                })
+              end
+
+              map("<M-CR>",          jupyter.execute_and_advance, "Execute Cell and Advance")
+              map("<localleader>jj", jupyter.execute_cell,        "Execute Cell")
+              map("<localleader>ja", jupyter.execute_all,         "Execute All Cells")
+              map("<localleader>jc", jupyter.clear_cell,          "Clear Cell Output")
+              map("<localleader>jC", jupyter.clear_all_outputs,   "Clear All Outputs")
+              map("<localleader>jr", jupyter.restart_kernel,      "Restart Kernel")
+              map("<localleader>jq", jupyter.stop_kernel,         "Stop Kernel")
+              map("<localleader>ji", jupyter.hover,               "Inspect Symbol")
+            end,
+          })
+
+          vim.api.nvim_create_autocmd("User", {
+            pattern = "JupyterDeinitPre",
+            callback = function(ev)
+              for _, lhs in ipairs(KERNEL_BOUND_KEYS) do
+                pcall(vim.keymap.del, "n", lhs, { buffer = ev.data.bufnr })
+              end
             end,
           })
         EOF

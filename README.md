@@ -130,11 +130,28 @@ cells normally, then `:w` to round-trip back to the file on disk. See
 
 ### Keymaps
 
-There are **no default keymaps**. Bind the bits you want via
-`vim.keymap.set` — typically buffer-local, scoped to the supported
-filetypes:
+There are **no default keymaps**. The set below splits into two groups:
+
+- **Editing keymaps** — cell navigation, insertion, deletion, plus the
+  kernel start/stop verbs. These don't need a live kernel and are bound
+  buffer-local on `FileType`.
+- **Kernel-bound keymaps** — execution, hover, restart, clear. These
+  only make sense once a kernel is attached, so they're bound on the
+  [`JupyterKernelReady`](#user-autocommands) `User` autocommand and
+  removed on `JupyterDeinitPre`. Hitting `<localleader>jj` before
+  starting a kernel falls through to your default mapping (or beeps),
+  which is exactly the right feedback.
 
 ```lua
+local KERNEL_BOUND_KEYS = {
+  "<M-CR>",
+  "<localleader>jj", "<localleader>ja",
+  "<localleader>jc", "<localleader>jC",
+  "<localleader>jr", "<localleader>jq",
+  "<localleader>ji",
+}
+
+-- Editing verbs: always available on supported filetypes
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "python", "julia", "r" },
   callback = function(ev)
@@ -147,23 +164,44 @@ vim.api.nvim_create_autocmd("FileType", {
     map("]j", jupyter.next_cell, "Next Cell")
     map("[j", jupyter.prev_cell, "Previous Cell")
 
-    -- Notebook-style "run cell, advance" on Alt+Enter.
-    map("<M-CR>", jupyter.execute_and_advance, "Execute Cell and Advance")
+    -- Cell editing
+    map("<localleader>jo", jupyter.insert_cell_below, "Insert Cell Below")
+    map("<localleader>jO", jupyter.insert_cell_above, "Insert Cell Above")
+    map("<localleader>jd", jupyter.delete_cell,       "Delete Cell")
+    map("<localleader>jm", jupyter.merge_with_prev,   "Merge with Previous")
+    map("<localleader>js", jupyter.split_at_cursor,   "Split Cell at Cursor")
 
-    -- Filetype-local verbs under <localleader>j
-    map("<localleader>jj", jupyter.execute_cell,       "Execute Cell")
-    map("<localleader>ja", jupyter.execute_all,        "Execute All Cells")
-    map("<localleader>jo", jupyter.insert_cell_below,  "Insert Cell Below")
-    map("<localleader>jO", jupyter.insert_cell_above,  "Insert Cell Above")
-    map("<localleader>jd", jupyter.delete_cell,        "Delete Cell")
-    map("<localleader>jm", jupyter.merge_with_prev,    "Merge with Previous")
-    map("<localleader>js", jupyter.split_at_cursor,    "Split Cell at Cursor")
-    map("<localleader>jc", jupyter.clear_cell,         "Clear Cell Output")
-    map("<localleader>jC", jupyter.clear_all_outputs,  "Clear All Outputs")
-    map("<localleader>jr", jupyter.restart_kernel,     "Restart Kernel")
+    -- Kernel lifecycle entry point
     map("<localleader>jk", function() jupyter.start_kernel() end, "Start Kernel")
-    map("<localleader>jq", jupyter.stop_kernel,        "Stop Kernel")
-    map("<localleader>ji", jupyter.hover,              "Inspect Symbol")
+  end,
+})
+
+-- Kernel-bound verbs: live only between JupyterKernelReady and JupyterDeinitPre
+vim.api.nvim_create_autocmd("User", {
+  pattern = "JupyterKernelReady",
+  callback = function(ev)
+    local jupyter = require("jupyter")
+    local function map(lhs, rhs, desc)
+      vim.keymap.set("n", lhs, rhs, { buffer = ev.data.bufnr, silent = true, desc = desc })
+    end
+
+    map("<M-CR>",          jupyter.execute_and_advance, "Execute Cell and Advance")
+    map("<localleader>jj", jupyter.execute_cell,        "Execute Cell")
+    map("<localleader>ja", jupyter.execute_all,         "Execute All Cells")
+    map("<localleader>jc", jupyter.clear_cell,          "Clear Cell Output")
+    map("<localleader>jC", jupyter.clear_all_outputs,   "Clear All Outputs")
+    map("<localleader>jr", jupyter.restart_kernel,      "Restart Kernel")
+    map("<localleader>jq", jupyter.stop_kernel,         "Stop Kernel")
+    map("<localleader>ji", jupyter.hover,               "Inspect Symbol")
+  end,
+})
+
+vim.api.nvim_create_autocmd("User", {
+  pattern = "JupyterDeinitPre",
+  callback = function(ev)
+    for _, lhs in ipairs(KERNEL_BOUND_KEYS) do
+      pcall(vim.keymap.del, "n", lhs, { buffer = ev.data.bufnr })
+    end
   end,
 })
 ```
@@ -171,25 +209,6 @@ vim.api.nvim_create_autocmd("FileType", {
 `K` is intentionally not bound — when a kernel is attached the
 in-process LSP serves `textDocument/hover`, so the editor's normal
 LSP `K` mapping already produces kernel-backed inspection.
-
-If you use [lazy.nvim](https://github.com/folke/lazy.nvim), the same
-binding set fits naturally into a plugin spec via `keys` and `ft`:
-
-```lua
-{
-  "sei40kr/jupyter.nvim",
-  build = ":UpdateRemotePlugins",
-  ft = { "python", "julia", "r" },
-  opts = {},
-  keys = {
-    { "]j", function() require("jupyter").next_cell() end, ft = { "python", "julia", "r" }, desc = "Next Cell" },
-    { "[j", function() require("jupyter").prev_cell() end, ft = { "python", "julia", "r" }, desc = "Previous Cell" },
-    { "<localleader>jj", function() require("jupyter").execute_cell() end, ft = { "python", "julia", "r" }, desc = "Execute Cell" },
-    { "<localleader>ja", function() require("jupyter").execute_all() end,  ft = { "python", "julia", "r" }, desc = "Execute All Cells" },
-    -- …add the rest as needed
-  },
-}
-```
 
 ## Lua API
 
@@ -242,6 +261,31 @@ require("jupyter").setup({
       error    = "DiagnosticError",
     },
   },
+})
+```
+
+## User autocommands
+
+Lifecycle hooks fire as `User` autocommands so configuration, statusline
+plugins, and other integrations can react without polling. Every event
+carries `ev.data.bufnr`; events that fire while a kernel exists also
+carry `ev.data.kernel_id`. See [Keymaps](#keymaps) for an example that
+gates execution mappings on `JupyterKernelReady` / `JupyterDeinitPost`.
+
+| Pattern              | When                                                 | `ev.data`               |
+| -------------------- | ---------------------------------------------------- | ----------------------- |
+| `JupyterInitPre`     | Before a kernel is started for a buffer              | `{ bufnr }`             |
+| `JupyterInitPost`    | After the kernel is registered and the LSP attached  | `{ bufnr, kernel_id }`  |
+| `JupyterKernelReady` | After `start_kernel` or `restart_kernel` completes   | `{ bufnr, kernel_id }`  |
+| `JupyterDeinitPre`   | Before `stop_kernel` tears the kernel down           | `{ bufnr, kernel_id }`  |
+| `JupyterDeinitPost`  | After the kernel, display, and LSP have been cleaned | `{ bufnr }`             |
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "JupyterKernelReady",
+  callback = function(ev)
+    vim.notify(("kernel %s ready in buffer %d"):format(ev.data.kernel_id, ev.data.bufnr))
+  end,
 })
 ```
 
