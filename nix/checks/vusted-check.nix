@@ -1,9 +1,13 @@
 { inputs, pkgs, ... }:
 let
-  treesitterParsers = pkgs.vimPlugins.nvim-treesitter.withPlugins (p: [ p.python ]);
+  treesitterParsers = pkgs.vimPlugins.nvim-treesitter.withPlugins (p: [
+    p.python
+    p.julia
+    p.r
+  ]);
 
-  # Wrap nvim with the python parser so jupyter.cell tests can execute
-  # their Treesitter queries inside the sandbox.
+  # Wrap nvim with the python/julia/r parsers so jupyter.cell tests can
+  # execute their Treesitter queries inside the sandbox.
   neovimWithParsers = pkgs.wrapNeovimUnstable pkgs.neovim-unwrapped {
     plugins = [ { plugin = treesitterParsers; } ];
   };
