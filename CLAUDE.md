@@ -130,7 +130,7 @@ lua/
     ├── display.lua             # Virtual text / extmark output rendering
     │                           # (Phase 2: content-type-aware formatting)
     │
-    ├── hover.lua               # Hover entry point used by :JupyterHover
+    ├── hover.lua               # Hover entry point used by jupyter.hover()
     │
     ├── lsp.lua                 # In-process LSP server: completion + hover
     │                           # backed by kernel.complete / kernel.inspect
@@ -290,7 +290,7 @@ Phase 1 renders the `text/plain` representation only. Phase 2 introduces content
 
 #### `hover.lua`
 
-Calls `jupyter_core.Kernel:inspect` and shows the result in Neovim's standard hover floating window. Used by the `:JupyterHover` command for users who want explicit invocation; for the LSP-driven path, see `lsp.lua`.
+Calls `jupyter_core.Kernel:inspect` and shows the result in Neovim's standard hover floating window. Used by `require("jupyter").hover()` for users who want explicit invocation; for the LSP-driven path, see `lsp.lua`.
 
 #### `lsp.lua`
 

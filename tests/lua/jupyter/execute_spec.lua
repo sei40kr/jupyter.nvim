@@ -122,7 +122,7 @@ describe("jupyter.execute", function()
 
 			assert.equals(1, #notifications)
 			assert.equals(vim.log.levels.WARN, notifications[1].level)
-			assert.is_truthy(notifications[1].msg:match(":JupyterStart"))
+			assert.is_truthy(notifications[1].msg:match("start_kernel"))
 			assert.equals(0, #events)
 		end)
 

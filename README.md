@@ -121,8 +121,9 @@ import math
 [math.sqrt(n) for n in range(1, 6)]
 ```
 
-1. `:JupyterStart` — pick a kernelspec (or pass one: `:JupyterStart python3`).
-2. Place the cursor inside a cell and run `:JupyterExecute`.
+1. `:lua require("jupyter").start_kernel()` — pick a kernelspec (or pass one:
+   `require("jupyter").start_kernel("python3")`).
+2. Place the cursor inside a cell and call `require("jupyter").execute_cell()`.
 3. Output appears below the cell as virtual text.
 
 The same workflow applies to `.ipynb` notebooks. `nvim foo.ipynb`
@@ -134,57 +135,52 @@ There are **no default keymaps** unless `create_default_keymaps = true` is
 passed to `setup`. When enabled, the plugin installs the following
 buffer-local maps in supported buffers (`python`, `julia`, `r`):
 
-| Mapping            | Command               | Description           |
-| ------------------ | --------------------- | --------------------- |
-| `<localleader>jx`  | `:JupyterExecute`     | Execute current cell  |
-| `<localleader>jX`  | `:JupyterExecuteAll`  | Execute every cell    |
-| `<localleader>jc`  | `:JupyterClear`       | Clear cell output     |
-| `<localleader>jn`  | `:JupyterNext`        | Next cell             |
-| `<localleader>jp`  | `:JupyterPrev`        | Previous cell         |
-| `<localleader>jo`  | `:JupyterInsertBelow` | Insert cell below     |
-| `<localleader>jO`  | `:JupyterInsertAbove` | Insert cell above     |
-| `K`                | `:JupyterHover`       | Kernel-backed hover   |
+| Mapping            | Lua API                                | Description           |
+| ------------------ | -------------------------------------- | --------------------- |
+| `<localleader>jx`  | `require("jupyter").execute_cell()`    | Execute current cell  |
+| `<localleader>jX`  | `require("jupyter").execute_all()`     | Execute every cell    |
+| `<localleader>jc`  | `require("jupyter").clear_cell()`      | Clear cell output     |
+| `<localleader>jn`  | `require("jupyter").next_cell()`       | Next cell             |
+| `<localleader>jp`  | `require("jupyter").prev_cell()`       | Previous cell         |
+| `<localleader>jo`  | `require("jupyter").insert_cell_below()` | Insert cell below   |
+| `<localleader>jO`  | `require("jupyter").insert_cell_above()` | Insert cell above   |
+| `K`                | `require("jupyter").hover()`           | Kernel-backed hover   |
 
 Or roll your own:
 
 ```lua
-vim.keymap.set("n", "<leader>x", "<Cmd>JupyterExecute<CR>", { desc = "Execute cell" })
-vim.keymap.set("n", "]j",        "<Cmd>JupyterNext<CR>",    { desc = "Next cell" })
-vim.keymap.set("n", "[j",        "<Cmd>JupyterPrev<CR>",    { desc = "Prev cell" })
+local jupyter = require("jupyter")
+vim.keymap.set("n", "<leader>x", jupyter.execute_cell, { desc = "Execute cell" })
+vim.keymap.set("n", "]j",        jupyter.next_cell,    { desc = "Next cell" })
+vim.keymap.set("n", "[j",        jupyter.prev_cell,    { desc = "Prev cell" })
 ```
 
-## Commands
+## Lua API
 
-> [!WARNING]
-> User commands are likely to be removed in a future release in favor of a
-> Lua-only API. Prefer `require("jupyter").<fn>()` from your config when
-> wiring up keymaps.
+`require("jupyter")` exposes:
 
-<details>
-<summary>The full <code>:Jupyter*</code> command list</summary>
+| Function                                    | Description                                        |
+| ------------------------------------------- | -------------------------------------------------- |
+| `start_kernel(spec_name?)`                  | Start a kernel for the current buffer              |
+| `stop_kernel()`                             | Stop the buffer's kernel                           |
+| `restart_kernel()`                          | Restart the buffer's kernel                        |
+| `execute_cell()`                            | Execute the cell at the cursor                     |
+| `execute_all()`                             | Execute every cell in the buffer in order          |
+| `clear_cell()`                              | Clear the output of the cell at the cursor         |
+| `clear_all_outputs()`                       | Clear every cell output in the buffer              |
+| `next_cell()`                               | Move cursor to the next cell                       |
+| `prev_cell()`                               | Move cursor to the previous cell                   |
+| `insert_cell_below(cell_type?)`             | Insert a new cell below the current cell           |
+| `insert_cell_above(cell_type?)`             | Insert a new cell above the current cell           |
+| `delete_cell()`                             | Delete the cell at the cursor                      |
+| `merge_with_prev()`                         | Merge the current cell with the previous cell      |
+| `split_at_cursor()`                         | Split the current cell at the cursor               |
+| `hover()`                                   | Kernel-backed hover for the symbol under cursor    |
 
-| Command                | Description                                        |
-| ---------------------- | -------------------------------------------------- |
-| `:JupyterStart [spec]` | Start a kernel for the current buffer              |
-| `:JupyterStop`         | Stop the buffer's kernel                           |
-| `:JupyterRestart`      | Restart the buffer's kernel                        |
-| `:JupyterExecute`      | Execute the cell at the cursor                     |
-| `:JupyterExecuteAll`   | Execute every cell in the buffer in order          |
-| `:JupyterClear`        | Clear the output of the cell at the cursor         |
-| `:JupyterClearAll`     | Clear every cell output in the buffer              |
-| `:JupyterNext`         | Move cursor to the next cell                       |
-| `:JupyterPrev`         | Move cursor to the previous cell                   |
-| `:JupyterInsertBelow`  | Insert a new cell below the current cell           |
-| `:JupyterInsertAbove`  | Insert a new cell above the current cell           |
-| `:JupyterHover`        | Kernel-backed hover for the symbol under cursor    |
-
-`:JupyterStart` accepts a kernelspec name and tab-completes the list returned
-by `jupyter kernelspec list`. Without an argument it uses `default_kernel`,
-then falls back to a filetype-based default
-(`python` → `python3`, `julia` → first `julia*`, `r` → `ir`),
-and finally to a `vim.ui.select` prompt when no installed kernel matches.
-
-</details>
+`start_kernel` accepts an optional kernelspec name. Without an argument
+it uses `default_kernel`, then falls back to a filetype-based default
+(`python` → `python3`, `julia` → first `julia*`, `r` → `ir`), and
+finally to a `vim.ui.select` prompt when no installed kernel matches.
 
 ## Configuration
 
@@ -194,7 +190,7 @@ plugin versions tolerate newer configs.
 
 ```lua
 require("jupyter").setup({
-  -- Kernelspec name to use when :JupyterStart is invoked without arguments.
+  -- Kernelspec name to use when start_kernel() is invoked without arguments.
   default_kernel = nil,
 
   -- Virtual-text output rendering. nil uses the built-in defaults.
@@ -209,9 +205,6 @@ require("jupyter").setup({
       error    = "DiagnosticError",
     },
   },
-
-  -- Register :Jupyter* user commands.
-  create_user_commands = true,
 
   -- Install buffer-local <localleader>j* keymaps in supported buffers
   -- (python, julia, r).

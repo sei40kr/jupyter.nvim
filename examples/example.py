@@ -2,8 +2,9 @@
 # # jupyter.nvim demo
 #
 # Open this file inside the devshell with `nvim examples/example.py`,
-# then `:JupyterStart python3` and step through the cells with
-# `:JupyterExecute` (or `<localleader>jx` if default keymaps are enabled).
+# then `:lua require('jupyter').start_kernel('python3')` and step through
+# the cells with `:lua require('jupyter').execute_cell()` (or
+# `<localleader>jx` if default keymaps are enabled).
 
 # %%
 print("hello from the kernel")

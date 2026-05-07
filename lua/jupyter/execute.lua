@@ -71,7 +71,10 @@ end
 function M.execute_cell(bufnr, row)
 	local kernel = get_kernel(bufnr)
 	if kernel == nil then
-		vim.notify("jupyter: no Jupyter kernel started for this buffer; run :JupyterStart", vim.log.levels.WARN)
+		vim.notify(
+			"jupyter: no Jupyter kernel started for this buffer; call require('jupyter').start_kernel()",
+			vim.log.levels.WARN
+		)
 		return
 	end
 	if kernel.state == "dead" then
@@ -94,7 +97,10 @@ end
 function M.execute_all(bufnr)
 	local kernel = get_kernel(bufnr)
 	if kernel == nil then
-		vim.notify("jupyter: no Jupyter kernel started for this buffer; run :JupyterStart", vim.log.levels.WARN)
+		vim.notify(
+			"jupyter: no Jupyter kernel started for this buffer; call require('jupyter').start_kernel()",
+			vim.log.levels.WARN
+		)
 		return
 	end
 	if kernel.state == "dead" then

@@ -18,24 +18,6 @@ local JUPYTER_MODULES = {
 	"jupyter_core.kernel_spec",
 }
 
----@return string[]
-local function list_user_commands()
-	---@type string[]
-	local names = {}
-	for name, _ in pairs(vim.api.nvim_get_commands({})) do
-		if name:sub(1, 7) == "Jupyter" then
-			names[#names + 1] = name
-		end
-	end
-	return names
-end
-
-local function delete_jupyter_user_commands()
-	for _, name in ipairs(list_user_commands()) do
-		pcall(vim.api.nvim_del_user_command, name)
-	end
-end
-
 ---@param fn fun(notifications: {msg: string, level: integer}[])
 local function with_notify(fn)
 	local original = vim.notify
@@ -173,14 +155,12 @@ describe("jupyter.init", function()
 	local registry
 
 	before_each(function()
-		delete_jupyter_user_commands()
 		stubs = make_stubs()
 		jupyter = reload_with_stubs(stubs)
 		registry = require("jupyter.registry")
 	end)
 
 	after_each(function()
-		delete_jupyter_user_commands()
 		pcall(vim.api.nvim_del_augroup_by_name, "jupyter.default_keymaps")
 		if registry ~= nil then
 			for _, b in ipairs(registry.bufnrs()) do
@@ -198,7 +178,6 @@ describe("jupyter.init", function()
 				jupyter.setup({ default_kernel = "python3" })
 			end)
 			assert.equals("python3", jupyter._cfg.default_kernel)
-			assert.equals(true, jupyter._cfg.create_user_commands)
 			assert.equals(false, jupyter._cfg.create_default_keymaps)
 		end)
 
@@ -215,39 +194,6 @@ describe("jupyter.init", function()
 				assert.equals(vim.log.levels.WARN, found.level)
 			end)
 			assert.equals("python3", jupyter._cfg.default_kernel)
-		end)
-
-		it("registers all user commands when create_user_commands = true", function()
-			with_notify(function()
-				jupyter.setup({})
-			end)
-			local commands = vim.api.nvim_get_commands({})
-			local expected = {
-				"JupyterStart",
-				"JupyterStop",
-				"JupyterRestart",
-				"JupyterExecute",
-				"JupyterExecuteAll",
-				"JupyterClear",
-				"JupyterClearAll",
-				"JupyterNext",
-				"JupyterPrev",
-				"JupyterInsertBelow",
-				"JupyterInsertAbove",
-				"JupyterHover",
-			}
-			for _, name in ipairs(expected) do
-				assert.is_truthy(commands[name], ("missing user command: %s"):format(name))
-			end
-		end)
-
-		it("does not register user commands when create_user_commands = false", function()
-			with_notify(function()
-				jupyter.setup({ create_user_commands = false })
-			end)
-			local commands = vim.api.nvim_get_commands({})
-			assert.is_nil(commands["JupyterStart"])
-			assert.is_nil(commands["JupyterExecute"])
 		end)
 
 		it("forwards display options to display.setup", function()

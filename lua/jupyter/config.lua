@@ -9,7 +9,6 @@ local M = {}
 ---@class jupyter.Config
 ---@field default_kernel string?            spec_name to use if start_kernel called w/o arg
 ---@field display jupyter.display.Config?
----@field create_user_commands boolean      default true
 ---@field create_default_keymaps boolean    default false (document recommended maps)
 ---@field virtual_lsp boolean               auto-attach the in-process LSP when a kernel starts (default true)
 
@@ -17,7 +16,6 @@ local M = {}
 M.defaults = {
 	default_kernel = nil,
 	display = nil,
-	create_user_commands = true,
 	create_default_keymaps = false,
 	virtual_lsp = true,
 }
@@ -26,7 +24,6 @@ M.defaults = {
 local TYPE_CHECKS = {
 	default_kernel = "string",
 	display = "table",
-	create_user_commands = "boolean",
 	create_default_keymaps = "boolean",
 	virtual_lsp = "boolean",
 }

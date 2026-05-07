@@ -2,8 +2,9 @@
 # # jupyter.nvim demo (Julia)
 #
 # Open this file inside the devshell with `nvim examples/example.jl`,
-# then `:JupyterStart` (which auto-selects the Julia kernel) and step
-# through the cells with `:JupyterExecute` (or `<localleader>jx` if
+# then `:lua require('jupyter').start_kernel()` (which auto-selects the
+# Julia kernel) and step through the cells with
+# `:lua require('jupyter').execute_cell()` (or `<localleader>jx` if
 # default keymaps are enabled).
 
 # %%

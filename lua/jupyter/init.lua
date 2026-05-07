@@ -1,10 +1,10 @@
 ---Public entry point for the editor module.
 ---
----``setup`` wires user options, registers the ``:Jupyter*`` user commands,
----and (optionally) installs a small set of buffer-local keymaps in
----supported filetype buffers (see ``cell.supported_filetypes``). Every
----command-shaped function lives on this module so users can map them
----directly without poking at internal submodules.
+---``setup`` wires user options and (optionally) installs a small set of
+---buffer-local keymaps in supported filetype buffers (see
+---``cell.supported_filetypes``). Every command-shaped function lives on
+---this module so users can map them directly without poking at internal
+---submodules.
 
 local config = require("jupyter.config")
 local cell = require("jupyter.cell")
@@ -272,120 +272,73 @@ function M.hover()
 	hover_mod.hover(current_buf())
 end
 
----@type {name: string, fn: fun(args: table), opts: table}[]
-local USER_COMMANDS = {
+---@type {lhs: string, rhs: fun(), mode: string|string[], desc: string}[]
+local DEFAULT_KEYMAPS = {
 	{
-		name = "JupyterStart",
-		fn = function(args)
-			M.start_kernel(args.fargs[1])
-		end,
-		opts = {
-			nargs = "?",
-			complete = function()
-				local kernel_spec = require("jupyter_core").KernelSpec
-				return vim.tbl_map(function(s)
-					return s.name
-				end, kernel_spec.list())
-			end,
-			desc = "Start a Jupyter kernel for the current buffer",
-		},
-	},
-	{
-		name = "JupyterStop",
-		fn = function()
-			M.stop_kernel()
-		end,
-		opts = { desc = "Stop the buffer's Jupyter kernel" },
-	},
-	{
-		name = "JupyterRestart",
-		fn = function()
-			M.restart_kernel()
-		end,
-		opts = { desc = "Restart the buffer's Jupyter kernel" },
-	},
-	{
-		name = "JupyterExecute",
-		fn = function()
+		lhs = "<localleader>jx",
+		rhs = function()
 			M.execute_cell()
 		end,
-		opts = { desc = "Execute the cell at the cursor" },
+		mode = "n",
+		desc = "Jupyter: execute cell",
 	},
 	{
-		name = "JupyterExecuteAll",
-		fn = function()
+		lhs = "<localleader>jX",
+		rhs = function()
 			M.execute_all()
 		end,
-		opts = { desc = "Execute every cell in the buffer in order" },
+		mode = "n",
+		desc = "Jupyter: execute all cells",
 	},
 	{
-		name = "JupyterClear",
-		fn = function()
+		lhs = "<localleader>jc",
+		rhs = function()
 			M.clear_cell()
 		end,
-		opts = { desc = "Clear the output of the cell at the cursor" },
+		mode = "n",
+		desc = "Jupyter: clear cell output",
 	},
 	{
-		name = "JupyterClearAll",
-		fn = function()
-			M.clear_all_outputs()
-		end,
-		opts = { desc = "Clear every cell output in the buffer" },
-	},
-	{
-		name = "JupyterNext",
-		fn = function()
+		lhs = "<localleader>jn",
+		rhs = function()
 			M.next_cell()
 		end,
-		opts = { desc = "Move cursor to the next cell" },
+		mode = "n",
+		desc = "Jupyter: next cell",
 	},
 	{
-		name = "JupyterPrev",
-		fn = function()
+		lhs = "<localleader>jp",
+		rhs = function()
 			M.prev_cell()
 		end,
-		opts = { desc = "Move cursor to the previous cell" },
+		mode = "n",
+		desc = "Jupyter: previous cell",
 	},
 	{
-		name = "JupyterInsertBelow",
-		fn = function()
+		lhs = "<localleader>jo",
+		rhs = function()
 			M.insert_cell_below()
 		end,
-		opts = { desc = "Insert a new cell below the current cell" },
+		mode = "n",
+		desc = "Jupyter: insert cell below",
 	},
 	{
-		name = "JupyterInsertAbove",
-		fn = function()
+		lhs = "<localleader>jO",
+		rhs = function()
 			M.insert_cell_above()
 		end,
-		opts = { desc = "Insert a new cell above the current cell" },
+		mode = "n",
+		desc = "Jupyter: insert cell above",
 	},
 	{
-		name = "JupyterHover",
-		fn = function()
+		lhs = "K",
+		rhs = function()
 			M.hover()
 		end,
-		opts = { desc = "Show kernel-backed hover for the symbol under the cursor" },
+		mode = "n",
+		desc = "Jupyter: hover",
 	},
 }
-
----@type {lhs: string, rhs: string, mode: string|string[], desc: string}[]
-local DEFAULT_KEYMAPS = {
-	{ lhs = "<localleader>jx", rhs = "<Cmd>JupyterExecute<CR>", mode = "n", desc = "Jupyter: execute cell" },
-	{ lhs = "<localleader>jX", rhs = "<Cmd>JupyterExecuteAll<CR>", mode = "n", desc = "Jupyter: execute all cells" },
-	{ lhs = "<localleader>jc", rhs = "<Cmd>JupyterClear<CR>", mode = "n", desc = "Jupyter: clear cell output" },
-	{ lhs = "<localleader>jn", rhs = "<Cmd>JupyterNext<CR>", mode = "n", desc = "Jupyter: next cell" },
-	{ lhs = "<localleader>jp", rhs = "<Cmd>JupyterPrev<CR>", mode = "n", desc = "Jupyter: previous cell" },
-	{ lhs = "<localleader>jo", rhs = "<Cmd>JupyterInsertBelow<CR>", mode = "n", desc = "Jupyter: insert cell below" },
-	{ lhs = "<localleader>jO", rhs = "<Cmd>JupyterInsertAbove<CR>", mode = "n", desc = "Jupyter: insert cell above" },
-	{ lhs = "K", rhs = "<Cmd>JupyterHover<CR>", mode = "n", desc = "Jupyter: hover" },
-}
-
-local function register_user_commands()
-	for _, cmd in ipairs(USER_COMMANDS) do
-		vim.api.nvim_create_user_command(cmd.name, cmd.fn, cmd.opts)
-	end
-end
 
 local DEFAULT_KEYMAPS_AUGROUP = "jupyter.default_keymaps"
 
@@ -407,15 +360,12 @@ local function install_default_keymaps()
 end
 
 ---Initialize the plugin. Safe to call multiple times — the most recent
----options win, user commands re-register harmlessly, and the
----default-keymap autocmd group is cleared between calls.
+---options win and the default-keymap autocmd group is cleared between
+---calls.
 ---@param opts jupyter.Config?
 function M.setup(opts)
 	M._cfg = config.merge(opts)
 	display.setup(M._cfg.display)
-	if M._cfg.create_user_commands then
-		register_user_commands()
-	end
 	if M._cfg.create_default_keymaps then
 		install_default_keymaps()
 	end
