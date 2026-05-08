@@ -4,19 +4,33 @@
 ---and a status indicator is placed at the cell's marker line via
 ---right-of-line `virt_text`. The buffer's text is never modified.
 
+local image = require("jupyter.display.image")
+
 local M = {}
+
+---@class jupyter.display.ImageConfig
+---@field renderer? "snacks"
+---@field max_width? integer
+---@field max_height? integer
+
+---@class jupyter.display.ResolvedImageConfig
+---@field renderer? "snacks"
+---@field max_width integer
+---@field max_height integer
 
 ---@class jupyter.display.Config
 ---@field max_lines? integer
 ---@field truncation_hint? string
 ---@field hl_group? string
 ---@field status_hl? table<string, string>
+---@field image? jupyter.display.ImageConfig
 
 ---@class jupyter.display.ResolvedConfig
 ---@field max_lines integer
 ---@field truncation_hint string
 ---@field hl_group string
 ---@field status_hl table<string, string>
+---@field image jupyter.display.ResolvedImageConfig
 
 ---@type jupyter.display.ResolvedConfig
 local config = {
@@ -29,14 +43,20 @@ local config = {
 		busy = "DiagnosticInfo",
 		error = "DiagnosticError",
 	},
+	image = {
+		renderer = nil,
+		max_width = 60,
+		max_height = 20,
+	},
 }
 
 local NS = vim.api.nvim_create_namespace("jupyter.display")
 
 ---@class jupyter.display.CellEntry
----@field anchor_id integer        -- extmark anchored at the cell's marker row
----@field output_ids integer[]     -- ids of virt_lines marks below the cell
----@field status_id integer?       -- id of the eol status mark, when set
+---@field anchor_id integer                                       -- extmark anchored at the cell's marker row
+---@field output_ids integer[]                                    -- ids of virt_lines marks below the cell
+---@field status_id integer?                                      -- id of the eol status mark, when set
+---@field image_placements jupyter.display.image.Placement[]      -- placements owned by this cell
 
 ---Per-buffer list of live cell entries. Looked up by resolving each
 ---anchor's current row and matching against the requested cell.
@@ -115,7 +135,7 @@ local function ensure_entry(bufnr, cell)
 	state[bufnr] = state[bufnr] or {}
 	local anchor_id = vim.api.nvim_buf_set_extmark(bufnr, NS, cell.start_row, 0, {})
 	---@type jupyter.display.CellEntry
-	local entry = { anchor_id = anchor_id, output_ids = {}, status_id = nil }
+	local entry = { anchor_id = anchor_id, output_ids = {}, status_id = nil, image_placements = {} }
 	table.insert(state[bufnr], entry)
 	return entry
 end
@@ -127,6 +147,10 @@ local function clear_output_marks(bufnr, entry)
 		pcall(vim.api.nvim_buf_del_extmark, bufnr, NS, id)
 	end
 	entry.output_ids = {}
+	for _, p in ipairs(entry.image_placements) do
+		pcall(p.close, p)
+	end
+	entry.image_placements = {}
 end
 
 ---Set or merge the global config. Idempotent.
@@ -149,6 +173,17 @@ function M.setup(cfg)
 			config.status_hl[k] = v
 		end
 	end
+	if cfg.image ~= nil then
+		if cfg.image.renderer ~= nil then
+			config.image.renderer = cfg.image.renderer
+		end
+		if cfg.image.max_width ~= nil then
+			config.image.max_width = cfg.image.max_width
+		end
+		if cfg.image.max_height ~= nil then
+			config.image.max_height = cfg.image.max_height
+		end
+	end
 end
 
 ---Render `outputs` for `cell` in `bufnr`. Replaces any prior output
@@ -160,11 +195,31 @@ function M.show_output(bufnr, cell, outputs)
 	local entry = ensure_entry(bufnr, cell)
 	clear_output_marks(bufnr, entry)
 
+	local renderer = image.resolve(config.image.renderer)
+	local anchor_row = math.max(cell.end_row - 1, cell.start_row)
+
 	---@type string[]
 	local lines = {}
 	for _, output in ipairs(outputs) do
-		for _, line in ipairs(render_output(output)) do
-			lines[#lines + 1] = line
+		local placement = nil
+		if renderer ~= nil then
+			local mime = image.pick_mime(output)
+			if mime ~= nil then
+				local path = image.cache(output.data[mime], image.ext_for_mime(mime))
+				if path ~= nil then
+					placement = renderer:place(bufnr, anchor_row, path, {
+						max_width = config.image.max_width,
+						max_height = config.image.max_height,
+					})
+				end
+			end
+		end
+		if placement ~= nil then
+			entry.image_placements[#entry.image_placements + 1] = placement
+		else
+			for _, line in ipairs(render_output(output)) do
+				lines[#lines + 1] = line
+			end
 		end
 	end
 
@@ -191,7 +246,6 @@ function M.show_output(bufnr, cell, outputs)
 		return
 	end
 
-	local anchor_row = math.max(cell.end_row - 1, cell.start_row)
 	local id = vim.api.nvim_buf_set_extmark(bufnr, NS, anchor_row, 0, {
 		virt_lines = virt_lines,
 	})
@@ -231,6 +285,14 @@ end
 ---Clear all display marks (output + status + anchors) for `bufnr`.
 ---@param bufnr integer
 function M.clear_all(bufnr)
+	local entries = state[bufnr]
+	if entries ~= nil then
+		for _, entry in ipairs(entries) do
+			for _, p in ipairs(entry.image_placements) do
+				pcall(p.close, p)
+			end
+		end
+	end
 	vim.api.nvim_buf_clear_namespace(bufnr, NS, 0, -1)
 	state[bufnr] = nil
 end

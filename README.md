@@ -58,7 +58,7 @@ writing; check the project for its current state.
 | Jupyter kernel execution      | Yes                                   | Yes                      |
 | Cell detection via Treesitter | Yes                                   | Range-based; pair with NotebookNavigator/jupytext for cells |
 | Virtual-text output rendering | Yes                                   | Yes                      |
-| Inline images / rich MIME     | Planned (Phase 2)                     | Yes (image.nvim)         |
+| Inline images / rich MIME     | `image/png` and `image/jpeg` via [snacks.nvim][snacks] (Kitty Graphics Protocol) | Yes (image.nvim)         |
 | Kernel-backed completion      | Yes — generic LSP source              | No                       |
 | Kernel-backed hover           | Yes — generic LSP source              | No                       |
 | `.ipynb` round-trip           | Yes — load expands to percent, save writes JSON | Via jupytext             |
@@ -73,6 +73,7 @@ and they're served by a fully async rplugin so the editor stays responsive
 even while a cell is executing.
 
 [molten]: https://github.com/benlubas/molten-nvim
+[snacks]: https://github.com/folke/snacks.nvim
 
 ## Requirements
 
@@ -82,6 +83,12 @@ even while a cell is executing.
   - `jupyter_client`
 - After installing or updating the plugin, run `:UpdateRemotePlugins` and
   restart Neovim so the Python remote plugin's manifest is picked up.
+- *Optional, for inline images:* [`folke/snacks.nvim`][snacks] and a
+  terminal that supports the [Kitty Graphics Protocol][kitty-graphics]
+  (kitty, ghostty, wezterm). When either is missing, image outputs fall
+  back to their `text/plain` representation.
+
+[kitty-graphics]: https://sw.kovidgoyal.net/kitty/graphics-protocol/
 
 ## Installation
 
@@ -260,6 +267,18 @@ require("jupyter").setup({
       busy     = "DiagnosticInfo",
       error    = "DiagnosticError",
     },
+
+    -- Inline image rendering. Default is text-only.
+    -- Set renderer to "snacks" to render image/png and image/jpeg via
+    -- snacks.nvim (https://github.com/folke/snacks.nvim). Requires a
+    -- Kitty Graphics Protocol terminal (kitty / ghostty / wezterm).
+    -- Silently falls back to text/plain when snacks is missing or the
+    -- terminal is unsupported.
+    image = {
+      renderer   = nil,                   -- "snacks" | nil
+      max_width  = 60,                    -- columns (raise for larger plots)
+      max_height = 20,                    -- rows
+    },
   },
 })
 ```
@@ -334,8 +353,10 @@ notebook.
 
 Phase 2 (in progress):
 
-- Content-type-aware output rendering — pretty-print JSON, format
-  tracebacks, surface `image/*` and `text/html` inline where feasible.
+- Content-type-aware output rendering — `image/png` and `image/jpeg`
+  are inline via [`snacks.nvim`][snacks] (see [Configuration](#configuration));
+  pretty-printed JSON, formatted tracebacks, `text/html`, and
+  `image/svg+xml` are still to come.
 - Enhanced cell visualization — execution counters, timestamps, and
   highlighting on cell boundaries.
 

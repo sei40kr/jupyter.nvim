@@ -7,6 +7,7 @@ let
     ps.ipykernel
     ps.numpy
     ps.pandas
+    ps.matplotlib
   ]);
 
   juliaKernelEnv = pkgs.julia.withPackages [ "IJulia" ];
@@ -81,6 +82,7 @@ let
         { plugin = treesitterParsers; }
         { plugin = pkgs.vimPlugins.blink-cmp; }
         { plugin = pkgs.vimPlugins.which-key-nvim; }
+        { plugin = pkgs.vimPlugins.snacks-nvim; }
       ];
       customRC = ''
         lua << EOF
@@ -98,6 +100,20 @@ let
           })
 
           require("which-key").setup({})
+
+          -- snacks.image powers jupyter.nvim's inline image renderer.
+          -- Requires a Kitty Graphics Protocol terminal (kitty / ghostty /
+          -- wezterm) to actually render; otherwise jupyter.nvim falls back
+          -- to the text/plain repr.
+          require("snacks").setup({
+            image = { enabled = true },
+          })
+
+          require("jupyter").setup({
+            display = {
+              image = { renderer = "snacks" },
+            },
+          })
 
           local KERNEL_BOUND_KEYS = {
             "<M-CR>",

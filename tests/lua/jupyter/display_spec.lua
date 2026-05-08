@@ -233,6 +233,199 @@ describe("jupyter.display", function()
 		end)
 	end)
 
+	describe("show_output with image renderer", function()
+		---@type table[]
+		local placement_calls = {}
+		---@type table[]
+		local placement_instances = {}
+
+		---Install a fake snacks.image module. Records every placement.new
+		---call and exposes a :close() spy on each placement instance.
+		---@param opts? { supports_terminal?: boolean, fail_new?: boolean }
+		local function install_snacks(opts)
+			opts = opts or {}
+			local supports = opts.supports_terminal
+			if supports == nil then
+				supports = true
+			end
+			placement_calls = {}
+			placement_instances = {}
+			package.loaded["snacks.image"] = {
+				supports_terminal = function()
+					return supports
+				end,
+				placement = {
+					new = function(bufnr, src, place_opts)
+						placement_calls[#placement_calls + 1] = {
+							bufnr = bufnr,
+							src = src,
+							opts = place_opts,
+						}
+						if opts.fail_new then
+							error("snacks new failed")
+						end
+						local instance = { closed = 0, src = src }
+						function instance:close()
+							self.closed = self.closed + 1
+						end
+						placement_instances[#placement_instances + 1] = instance
+						return instance
+					end,
+				},
+			}
+		end
+
+		local function uninstall_snacks()
+			package.loaded["snacks.image"] = nil
+		end
+
+		-- A 1x1 transparent PNG, base64-encoded.
+		local PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+		after_each(function()
+			uninstall_snacks()
+		end)
+
+		it("default config (image.renderer = nil) does not place a mark for image-only output", function()
+			-- Re-asserts the existing contract: without opting in, image
+			-- payloads are dropped silently. install_snacks NOT called.
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+			assert.equals(0, #get_virt_lines_marks(buf))
+		end)
+
+		it("places an image via snacks when image.renderer = 'snacks'", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1", "y = 2" })
+			local cell = make_cell(0, 3)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+
+			assert.equals(1, #placement_calls)
+			assert.equals(buf, placement_calls[1].bufnr)
+			-- pos is 1-indexed, anchored at end_row - 1 = 2 → pos.row = 3
+			assert.same({ 3, 0 }, placement_calls[1].opts.pos)
+			assert.is_true(placement_calls[1].opts.inline)
+			assert.equals(60, placement_calls[1].opts.max_width)
+			assert.equals(20, placement_calls[1].opts.max_height)
+			-- No virt_lines for an image-only output.
+			assert.equals(0, #get_virt_lines_marks(buf))
+		end)
+
+		it("honors max_width / max_height overrides", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks", max_width = 70, max_height = 30 } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+
+			assert.equals(70, placement_calls[1].opts.max_width)
+			assert.equals(30, placement_calls[1].opts.max_height)
+		end)
+
+		it("renders image/jpeg via the same path", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/jpeg"] = PNG_B64 }) })
+
+			assert.equals(1, #placement_calls)
+			assert.matches("%.jpg$", placement_calls[1].src)
+		end)
+
+		it("falls back to text/plain when snacks is not installed", function()
+			-- image.renderer set but snacks.image not in package.loaded.
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, {
+				make_output("display_data", {}, {
+					["image/png"] = PNG_B64,
+					["text/plain"] = "<Figure size 640x480>",
+				}),
+			})
+
+			local marks = get_virt_lines_marks(buf)
+			assert.equals(1, #marks)
+			assert.same({ { { "<Figure size 640x480>", "Comment" } } }, marks[1][4].virt_lines)
+		end)
+
+		it("falls back to text/plain when supports_terminal returns false", function()
+			install_snacks({ supports_terminal = false })
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, {
+				make_output("display_data", {}, {
+					["image/png"] = PNG_B64,
+					["text/plain"] = "<Figure>",
+				}),
+			})
+
+			assert.equals(0, #placement_calls)
+			local marks = get_virt_lines_marks(buf)
+			assert.equals(1, #marks)
+		end)
+
+		it("renders text and image side-by-side as one virt_lines + one placement", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, {
+				make_output("stream", { "log line" }),
+				make_output("display_data", {}, { ["image/png"] = PNG_B64 }),
+			})
+
+			assert.equals(1, #placement_calls)
+			local marks = get_virt_lines_marks(buf)
+			assert.equals(1, #marks)
+			assert.same({ { { "log line", "Comment" } } }, marks[1][4].virt_lines)
+		end)
+
+		it("re-running show_output closes the prior image placements", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+
+			assert.equals(2, #placement_instances)
+			assert.equals(1, placement_instances[1].closed)
+			assert.equals(0, placement_instances[2].closed)
+		end)
+
+		it("clear_output closes image placements", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "x = 1" })
+			local cell = make_cell(0, 2)
+			display.show_output(buf, cell, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+
+			display.clear_output(buf, cell)
+
+			assert.equals(1, placement_instances[1].closed)
+		end)
+
+		it("clear_all closes image placements across cells", function()
+			install_snacks()
+			display.setup({ image = { renderer = "snacks" } })
+			local buf = make_buf({ "# %%", "a = 1", "# %%", "b = 2" })
+			local c1 = make_cell(0, 2)
+			local c2 = make_cell(2, 4)
+			display.show_output(buf, c1, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+			display.show_output(buf, c2, { make_output("display_data", {}, { ["image/png"] = PNG_B64 }) })
+
+			display.clear_all(buf)
+
+			assert.equals(1, placement_instances[1].closed)
+			assert.equals(1, placement_instances[2].closed)
+		end)
+	end)
+
 	describe("set_status", function()
 		it("places an eol virt_text on the marker line", function()
 			local buf = make_buf({ "# %%", "x = 1" })

@@ -24,6 +24,20 @@ colnames(df) <- LETTERS[1:4]
 summary(df)
 
 # %% [markdown]
+# ## Inline images
+#
+# Base R graphics produce a PNG that IRkernel attaches to the output's
+# MIME bundle. Set `display.image.renderer = "snacks"` and run this in a
+# Kitty Graphics Protocol terminal (kitty / ghostty / wezterm) to see it
+# inline; otherwise the cell falls back to text.
+
+# %%
+xs <- seq(0, 2 * pi, length.out = 200)
+plot(xs, sin(xs), type = "l", col = "steelblue", main = "sin / cos", ylab = "")
+lines(xs, cos(xs), col = "tomato")
+legend("topright", legend = c("sin", "cos"), col = c("steelblue", "tomato"), lty = 1)
+
+# %% [markdown]
 # ## Errors render too
 #
 # Run the next cell to see the traceback rendered as virtual text.

@@ -286,7 +286,7 @@ Render outputs as extmarks / virtual text. Never mutates buffer text.
 - `clear_output(bufnr, cell)`
 - `clear_all(bufnr)`
 
-Phase 1 renders the `text/plain` representation only. Phase 2 introduces content-type-aware formatting that picks a renderer based on the MIME bundle on each `Output` (e.g. pretty-print JSON, format tracebacks, handle `image/*` inline where feasible).
+Phase 1 renders the `text/plain` representation only. Phase 2 introduces content-type-aware formatting that picks a renderer based on the MIME bundle on each `Output`. The first content-aware renderer has landed: `image/png` and `image/jpeg` outputs go through [`snacks.nvim`](https://github.com/folke/snacks.nvim)'s `image` module when the user opts in via `display.image.renderer = "snacks"` and the terminal supports the Kitty Graphics Protocol; otherwise they fall back to `text/plain`. Pretty-printed JSON, formatted tracebacks, `text/html`, and `image/svg+xml` are still to come.
 
 #### `hover.lua`
 
