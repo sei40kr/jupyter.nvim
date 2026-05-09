@@ -109,8 +109,8 @@ function M.cache(b64, ext)
 		return nil
 	end
 	if vim.uv.fs_stat(dir) == nil then
-		vim.uv.fs_mkdir(dir, tonumber("755", 8))
-		if vim.uv.fs_stat(dir) == nil then
+		local ok_mkdir = pcall(vim.fn.mkdir, dir, "p")
+		if not ok_mkdir or vim.uv.fs_stat(dir) == nil then
 			return nil
 		end
 	end
